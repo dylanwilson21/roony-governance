@@ -52,4 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Primary blue color scheme (#1e40af)
   - Professional typography and spacing
   - Responsive layout
+- Authentication system with NextAuth.js
+  - Credentials provider for email/password login
+  - User registration with organization creation
+  - Session management with JWT
+  - Protected dashboard routes
+- Internal API endpoints
+  - `/api/internal/agents` - Agent CRUD operations
+  - `/api/internal/policies` - Policy management
+  - `/api/internal/transactions` - Transaction history
+  - `/api/internal/analytics` - Dashboard analytics
+- Stripe Connect OAuth callback handler
+- Interactive dashboard components
+  - Agent creation with API key display
+  - Policy builder with budget limits
+  - Transaction search and filtering
+  - Real-time analytics cards
+- shadcn/ui components
+  - Button, Card, Input, Label, Table
+  - Badge, Dialog, Tabs, Dropdown Menu
 
