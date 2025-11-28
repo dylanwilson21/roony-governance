@@ -27,3 +27,19 @@ dist/
 build/
 *.log
 
+# Next.js
+.next/
+out/
+
+# Database
+*.db
+*.db-journal
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Drizzle
+drizzle/
+
