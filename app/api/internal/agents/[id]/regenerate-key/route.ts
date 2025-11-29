@@ -12,9 +12,10 @@ import crypto from "crypto";
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.organizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -32,7 +33,7 @@ export async function POST(
       })
       .where(
         and(
-          eq(agents.id, params.id),
+          eq(agents.id, id),
           eq(agents.organizationId, session.user.organizationId)
         )
       )
@@ -54,4 +55,3 @@ export async function POST(
     );
   }
 }
-

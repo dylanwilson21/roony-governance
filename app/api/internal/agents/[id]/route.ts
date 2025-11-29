@@ -11,9 +11,10 @@ import { eq, and } from "drizzle-orm";
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.organizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -24,7 +25,7 @@ export async function GET(
       .from(agents)
       .where(
         and(
-          eq(agents.id, params.id),
+          eq(agents.id, id),
           eq(agents.organizationId, session.user.organizationId)
         )
       )
@@ -50,9 +51,10 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.organizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -70,7 +72,7 @@ export async function PUT(
       })
       .where(
         and(
-          eq(agents.id, params.id),
+          eq(agents.id, id),
           eq(agents.organizationId, session.user.organizationId)
         )
       )
@@ -96,9 +98,10 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.organizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -108,7 +111,7 @@ export async function DELETE(
       .delete(agents)
       .where(
         and(
-          eq(agents.id, params.id),
+          eq(agents.id, id),
           eq(agents.organizationId, session.user.organizationId)
         )
       )
@@ -127,4 +130,3 @@ export async function DELETE(
     );
   }
 }
-

@@ -11,9 +11,10 @@ import { eq, and } from "drizzle-orm";
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.organizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -24,7 +25,7 @@ export async function GET(
       .from(policies)
       .where(
         and(
-          eq(policies.id, params.id),
+          eq(policies.id, id),
           eq(policies.organizationId, session.user.organizationId)
         )
       )
@@ -56,9 +57,10 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.organizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -67,7 +69,7 @@ export async function PUT(
     const body = await request.json();
     const { name, description, scopeType, scopeIds, rules, action, priority, enabled } = body;
 
-    const updateData: Record<string, any> = {
+    const updateData: Record<string, unknown> = {
       updatedAt: new Date(),
     };
 
@@ -85,7 +87,7 @@ export async function PUT(
       .set(updateData)
       .where(
         and(
-          eq(policies.id, params.id),
+          eq(policies.id, id),
           eq(policies.organizationId, session.user.organizationId)
         )
       )
@@ -117,9 +119,10 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.organizationId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -129,7 +132,7 @@ export async function DELETE(
       .delete(policies)
       .where(
         and(
-          eq(policies.id, params.id),
+          eq(policies.id, id),
           eq(policies.organizationId, session.user.organizationId)
         )
       )
@@ -148,4 +151,3 @@ export async function DELETE(
     );
   }
 }
-

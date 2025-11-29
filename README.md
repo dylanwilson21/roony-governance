@@ -8,8 +8,9 @@ Roony is a financial firewall for AI agents. It sits between your agents and you
 
 - **Real-time Policy Evaluation**: Evaluate purchase requests against configurable policies
 - **Just-in-Time Virtual Cards**: Issue single-use, constrained virtual cards via Stripe Issuing
+- **MCP Protocol Support**: Native Model Context Protocol integration for AI agent platforms
 - **Secure Payment Infrastructure**: Stripe Connect OAuth flow (no raw API keys)
-- **Comprehensive Policy Engine**: Budget limits, merchant controls, MCC filtering, time-based rules, risk triggers
+- **Comprehensive Policy Engine**: Budget limits, merchant controls, MCC filtering, time-based rules
 - **Full Audit Trail**: Track all transactions, approvals, and rejections
 - **Professional Dashboard**: Blue/white financial professional UI with shadcn/ui
 
@@ -25,13 +26,14 @@ Comprehensive documentation is available in the `docs/` directory:
 
 - **[Development Status](docs/DEVELOPMENT_STATUS.md)** - Current state, what's built, how to test
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture, data flow, component relationships
-- **[API Documentation](docs/API.md)** - API specifications for agent endpoints and internal APIs
+- **[API Documentation](docs/API.md)** - REST API specifications for agent endpoints
+- **[MCP Integration](docs/MCP_INTEGRATION.md)** - Model Context Protocol integration guide
 - **[Policy Engine](docs/POLICY_ENGINE.md)** - Policy engine design, rule DSL, evaluation logic
-- **[Stripe Integration](docs/STRIPE_INTEGRATION.md)** - Stripe Connect setup, Issuing API usage, webhook handling
+- **[Stripe Integration](docs/STRIPE_INTEGRATION.md)** - Stripe Connect setup, Issuing API usage
 - **[Database Schema](docs/DATABASE_SCHEMA.md)** - Database models, relationships, migrations
 - **[UI Components](docs/UI_COMPONENTS.md)** - Component library structure, design system
-- **[Deployment](docs/DEPLOYMENT.md)** - Deployment process, environment variables, infrastructure
-- **[Contributing](docs/CONTRIBUTING.md)** - Development workflow, coding standards, testing approach
+- **[Deployment](docs/DEPLOYMENT.md)** - Deployment process, environment variables
+- **[Contributing](docs/CONTRIBUTING.md)** - Development workflow, coding standards
 
 ## Quick Start
 
@@ -121,11 +123,27 @@ npm run db:studio    # Open database studio
 
 1. **Connect Stripe**: Customer connects their Stripe account via OAuth (no raw API keys)
 2. **Define Policies**: Configure spending rules, budgets, merchant allowlists/blocklists
-3. **Agent Requests Purchase**: Agent calls `/api/v1/purchase_intent` with purchase details
+3. **Agent Requests Purchase**: Agent calls the API (REST or MCP) with purchase details
 4. **Policy Evaluation**: Roony evaluates request against all applicable policies
 5. **Card Creation**: If approved, create just-in-time virtual card via Stripe Issuing
 6. **Transaction Monitoring**: Track authorizations and settlements via webhooks
 7. **Dashboard**: Monitor spend, review transactions, manage policies and agents
+
+## Integration Options
+
+### REST API
+```bash
+POST /api/v1/purchase_intent
+Authorization: Bearer rk_your_api_key
+```
+
+### MCP Protocol
+```bash
+POST /api/mcp
+Authorization: Bearer rk_your_api_key
+```
+
+See [MCP Integration Guide](docs/MCP_INTEGRATION.md) for connecting to workflow builders and AI platforms.
 
 ## License
 

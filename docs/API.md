@@ -2,7 +2,12 @@
 
 ## Overview
 
-Roony provides a RESTful API for AI agents to request purchases and for internal management of policies, agents, and transactions.
+Roony provides two ways for AI agents to interact:
+
+1. **REST API** - Traditional HTTP API at `/api/v1/purchase_intent`
+2. **MCP Protocol** - Model Context Protocol at `/api/mcp` (see [MCP_INTEGRATION.md](MCP_INTEGRATION.md))
+
+This document covers the REST API. For MCP integration, see the dedicated guide.
 
 ## Base URL
 
@@ -27,7 +32,7 @@ Internal APIs require a valid NextAuth.js session. Users must be logged in via t
 
 ---
 
-## Agent Endpoints
+## Agent Endpoints (REST)
 
 ### POST /api/v1/purchase_intent
 

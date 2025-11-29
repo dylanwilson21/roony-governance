@@ -23,7 +23,9 @@ The MVP is fully functional and ready for testing/deployment.
 #### API Endpoints
 
 **Agent API** (for AI agents):
-- `POST /api/v1/purchase_intent` - Request purchase approval, receive virtual card
+- `POST /api/v1/purchase_intent` - REST API for purchase requests
+- `POST /api/mcp` - MCP Protocol endpoint for AI platforms
+- `GET /api/mcp` - MCP server info and capabilities
 
 **Internal APIs** (for dashboard):
 - `GET/POST /api/internal/agents` - List/create agents
@@ -55,6 +57,10 @@ The MVP is fully functional and ready for testing/deployment.
 - `lib/stripe/client.ts` - Stripe client
 - `lib/stripe/connect.ts` - Stripe Connect OAuth
 - `lib/stripe/issuing.ts` - Virtual card creation
+- `lib/mcp/server.ts` - MCP protocol server implementation
+- `lib/mcp/tools.ts` - MCP tool definitions
+- `lib/mcp/handlers.ts` - MCP tool execution handlers
+- `lib/mcp/types.ts` - MCP TypeScript types
 
 ### Frontend (100% Complete)
 
@@ -101,8 +107,9 @@ roony-governance/
 │   ├── api/
 │   │   ├── auth/            # NextAuth endpoints
 │   │   ├── internal/        # Dashboard APIs
+│   │   ├── mcp/             # MCP Protocol endpoint
 │   │   ├── stripe/          # Stripe Connect
-│   │   ├── v1/              # Agent API
+│   │   ├── v1/              # REST Agent API
 │   │   └── webhooks/        # Stripe webhooks
 │   ├── globals.css
 │   ├── layout.tsx
@@ -117,6 +124,7 @@ roony-governance/
 │   ├── auth/
 │   ├── budget/
 │   ├── database/
+│   ├── mcp/                 # MCP Protocol implementation
 │   ├── policy-engine/
 │   ├── stripe/
 │   └── utils.ts
@@ -169,7 +177,7 @@ npm run dev
 1. Register at `/register`
 2. Go to `/dashboard/agents` and create an agent (save the API key!)
 3. Go to `/dashboard/policies` and create a policy
-4. Test the API:
+4. Test via REST API:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/purchase_intent \
@@ -181,6 +189,35 @@ curl -X POST http://localhost:3000/api/v1/purchase_intent \
     "currency": "usd",
     "description": "Test purchase",
     "merchant": {"name": "Test Merchant"}
+  }'
+```
+
+5. Or test via MCP Protocol:
+
+```bash
+# List available tools
+curl -X POST http://localhost:3000/api/mcp \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# Request a purchase via MCP
+curl -X POST http://localhost:3000/api/mcp \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":2,
+    "method":"tools/call",
+    "params":{
+      "name":"request_purchase",
+      "arguments":{
+        "amount":50.00,
+        "currency":"usd",
+        "description":"Test purchase",
+        "merchant_name":"Test Merchant"
+      }
+    }
   }'
 ```
 

@@ -254,7 +254,7 @@ export async function POST(request: NextRequest) {
           exp_month: cardDetails.exp_month,
           exp_year: cardDetails.exp_year,
           cvc: cardDetails.cvc,
-          billing_zip: cardDetails.zip || "10001", // Default ZIP
+          billing_zip: "10001", // Default ZIP for virtual cards
         },
         hard_limit_amount: body.amount,
         currency: body.currency,

@@ -99,3 +99,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Links to relevant sections
 - Loading states and error handling
 
+### MCP Protocol Integration
+- Model Context Protocol (MCP) server implementation
+  - MCP endpoint at `/api/mcp`
+  - JSON-RPC 2.0 compliant protocol
+  - Protocol version 2024-11-05
+- MCP Tools available:
+  - `request_purchase` - Request purchase approval, receive virtual card
+  - `check_budget` - Check remaining budget and spending limits
+  - `list_transactions` - List recent transactions
+  - `get_policy_info` - Get spending policy information
+- MCP Integration documentation
+  - Setup guide for workflow builders
+  - Example code for TypeScript clients
+  - Claude Desktop integration
+  - Testing commands
+- Full MCP type definitions and handlers
+
