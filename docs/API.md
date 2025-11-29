@@ -47,7 +47,6 @@ Content-Type: application/json
 **Request Body:**
 ```json
 {
-  "agent_id": "uuid-of-agent",
   "amount": 129.99,
   "currency": "usd",
   "description": "1 month Figma Professional",
@@ -56,10 +55,22 @@ Content-Type: application/json
     "url": "https://www.figma.com/pricing"
   },
   "metadata": {
-    "project_id": "proj_design_system",
-    "user_id": "user_456"
+    "project_id": "proj_design_system"
   }
 }
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `amount` | ✅ | Purchase amount (e.g., 129.99) |
+| `currency` | ✅ | Currency code (e.g., "usd") |
+| `description` | ✅ | What is being purchased |
+| `merchant.name` | ✅ | Merchant name |
+| `merchant.url` | ❌ | Merchant URL |
+| `metadata` | ❌ | Additional metadata |
+| `agent_id` | ❌ | Optional - uses authenticated agent if omitted |
+
+**Note:** The `agent_id` field is optional. The agent is identified by the API key in the Authorization header.
 ```
 
 **Success Response (200):**

@@ -7,7 +7,7 @@ import { createVirtualCard, getCardDetails } from "@/lib/stripe/issuing";
 import crypto from "crypto";
 
 interface PurchaseIntentRequest {
-  agent_id: string;
+  agent_id?: string; // Optional - will use authenticated agent if not provided
   amount: number;
   currency: string;
   description: string;
@@ -72,14 +72,16 @@ export async function POST(request: NextRequest) {
     const body: PurchaseIntentRequest = await request.json();
 
     // Validate request
-    if (!body.agent_id || !body.amount || !body.currency || !body.description || !body.merchant?.name) {
+    if (!body.amount || !body.currency || !body.description || !body.merchant?.name) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing required fields: amount, currency, description, merchant.name" },
         { status: 400 }
       );
     }
 
-    if (body.agent_id !== agent.id) {
+    // If agent_id is provided, validate it matches the authenticated agent
+    // Otherwise, just use the authenticated agent's ID
+    if (body.agent_id && body.agent_id !== agent.id) {
       return NextResponse.json(
         { error: "agent_id does not match authenticated agent" },
         { status: 403 }
