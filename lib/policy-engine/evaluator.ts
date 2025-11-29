@@ -1,7 +1,8 @@
 import type { Policy, PurchaseRequest, PolicyEvaluationResult } from "./types";
 import { db } from "@/lib/database";
-import { policies, budgetTracking, blockedAttempts } from "@/lib/database/schema";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
+import { policies } from "@/lib/database/schema";
+import { eq } from "drizzle-orm";
+import { checkBudgetLimits } from "@/lib/budget/tracker";
 
 export class PolicyEvaluator {
   /**
@@ -193,19 +194,14 @@ export class PolicyEvaluator {
     teamId?: string,
     projectId?: string
   ): Promise<{ allowed: boolean; reasonCode?: string; message?: string }> {
-    // Check per-transaction limit
-    if (budgetRules.perTransactionLimit && request.amount > budgetRules.perTransactionLimit) {
-      return {
-        allowed: false,
-        reasonCode: "AMOUNT_TOO_HIGH",
-        message: `Transaction amount exceeds per-transaction limit of ${budgetRules.perTransactionLimit}`,
-      };
-    }
-
-    // Check period-based limits (simplified - would need proper period calculation)
-    // This is a placeholder - full implementation would query budget_tracking table
-
-    return { allowed: true };
+    // Use the budget tracker to check limits
+    return checkBudgetLimits(agentId, organizationId, request.amount, {
+      perTransactionLimit: budgetRules.perTransactionLimit,
+      dailyLimit: budgetRules.dailyLimit,
+      weeklyLimit: budgetRules.weeklyLimit,
+      monthlyLimit: budgetRules.monthlyLimit,
+      lifetimeLimit: budgetRules.lifetimeLimit,
+    });
   }
 
   /**

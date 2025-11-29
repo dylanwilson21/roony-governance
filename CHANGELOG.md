@@ -72,3 +72,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Button, Card, Input, Label, Table
   - Badge, Dialog, Tabs, Dropdown Menu
 
+### MVP Completion Features
+- Route protection middleware for dashboard
+- Complete Stripe Connect OAuth flow
+  - Initiate OAuth redirect
+  - Handle callback and store tokens
+  - Check connection status
+  - Disconnect functionality
+- Full Policy CRUD operations
+  - Create, Read, Update, Delete policies
+  - Toggle policy enabled/disabled
+  - Edit policy with merchant allowlist/blocklist
+- Agent API key management
+  - Create agents with API key generation
+  - Regenerate API keys
+  - Pause/activate agents
+  - Delete agents
+- Budget tracking implementation
+  - Track daily, weekly, monthly, lifetime spend
+  - Enforce budget limits in policy evaluation
+  - Real-time spend calculation
+- Enhanced dashboard
+  - Quick start guide
+  - Real analytics data
+  - Monthly spend tracking
+  - Links to relevant sections
+- Loading states and error handling
+

@@ -23,6 +23,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Policy {
   id: string;
@@ -31,10 +38,15 @@ interface Policy {
   scopeType: string;
   action: string;
   enabled: boolean;
+  priority: number;
   rules: {
     budget?: {
       monthlyLimit?: number;
       perTransactionLimit?: number;
+    };
+    merchant?: {
+      allowlist?: string[];
+      blocklist?: string[];
     };
   };
   createdAt: string;
@@ -44,7 +56,8 @@ export default function PoliciesPage() {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [editPolicy, setEditPolicy] = useState<Policy | null>(null);
+  const [saving, setSaving] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -53,6 +66,8 @@ export default function PoliciesPage() {
     scopeType: "org",
     monthlyLimit: "",
     perTransactionLimit: "",
+    merchantAllowlist: "",
+    merchantBlocklist: "",
     action: "approve",
   });
 
@@ -74,49 +89,135 @@ export default function PoliciesPage() {
     }
   }
 
-  async function createPolicy() {
+  function resetForm() {
+    setFormData({
+      name: "",
+      description: "",
+      scopeType: "org",
+      monthlyLimit: "",
+      perTransactionLimit: "",
+      merchantAllowlist: "",
+      merchantBlocklist: "",
+      action: "approve",
+    });
+  }
+
+  function openEditDialog(policy: Policy) {
+    setFormData({
+      name: policy.name,
+      description: policy.description || "",
+      scopeType: policy.scopeType,
+      monthlyLimit: policy.rules.budget?.monthlyLimit?.toString() || "",
+      perTransactionLimit: policy.rules.budget?.perTransactionLimit?.toString() || "",
+      merchantAllowlist: policy.rules.merchant?.allowlist?.join(", ") || "",
+      merchantBlocklist: policy.rules.merchant?.blocklist?.join(", ") || "",
+      action: policy.action,
+    });
+    setEditPolicy(policy);
+  }
+
+  async function savePolicy() {
     if (!formData.name.trim()) return;
     
-    setCreating(true);
+    setSaving(true);
     try {
-      const rules: any = { budget: {} };
-      if (formData.monthlyLimit) {
-        rules.budget.monthlyLimit = parseFloat(formData.monthlyLimit);
-      }
-      if (formData.perTransactionLimit) {
-        rules.budget.perTransactionLimit = parseFloat(formData.perTransactionLimit);
+      const rules: any = {};
+      
+      if (formData.monthlyLimit || formData.perTransactionLimit) {
+        rules.budget = {};
+        if (formData.monthlyLimit) {
+          rules.budget.monthlyLimit = parseFloat(formData.monthlyLimit);
+        }
+        if (formData.perTransactionLimit) {
+          rules.budget.perTransactionLimit = parseFloat(formData.perTransactionLimit);
+        }
       }
 
-      const res = await fetch("/api/internal/policies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          description: formData.description || null,
-          scopeType: formData.scopeType,
-          scopeIds: [],
-          rules,
-          action: formData.action,
-        }),
-      });
+      if (formData.merchantAllowlist || formData.merchantBlocklist) {
+        rules.merchant = {};
+        if (formData.merchantAllowlist) {
+          rules.merchant.allowlist = formData.merchantAllowlist.split(",").map(s => s.trim()).filter(Boolean);
+        }
+        if (formData.merchantBlocklist) {
+          rules.merchant.blocklist = formData.merchantBlocklist.split(",").map(s => s.trim()).filter(Boolean);
+        }
+      }
+
+      const payload = {
+        name: formData.name,
+        description: formData.description || null,
+        scopeType: formData.scopeType,
+        scopeIds: [],
+        rules,
+        action: formData.action,
+      };
+
+      let res;
+      if (editPolicy) {
+        res = await fetch(`/api/internal/policies/${editPolicy.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch("/api/internal/policies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      }
 
       if (res.ok) {
         const data = await res.json();
-        setPolicies([...policies, data.policy]);
+        if (editPolicy) {
+          setPolicies(policies.map(p => p.id === editPolicy.id ? data.policy : p));
+        } else {
+          setPolicies([...policies, data.policy]);
+        }
         setCreateOpen(false);
-        setFormData({
-          name: "",
-          description: "",
-          scopeType: "org",
-          monthlyLimit: "",
-          perTransactionLimit: "",
-          action: "approve",
-        });
+        setEditPolicy(null);
+        resetForm();
       }
     } catch (error) {
-      console.error("Error creating policy:", error);
+      console.error("Error saving policy:", error);
     } finally {
-      setCreating(false);
+      setSaving(false);
+    }
+  }
+
+  async function togglePolicyEnabled(policy: Policy) {
+    try {
+      const res = await fetch(`/api/internal/policies/${policy.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !policy.enabled }),
+      });
+
+      if (res.ok) {
+        setPolicies(policies.map(p => 
+          p.id === policy.id ? { ...p, enabled: !p.enabled } : p
+        ));
+      }
+    } catch (error) {
+      console.error("Error toggling policy:", error);
+    }
+  }
+
+  async function deletePolicy(policy: Policy) {
+    if (!confirm(`Are you sure you want to delete "${policy.name}"?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/internal/policies/${policy.id}`, {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        setPolicies(policies.filter(p => p.id !== policy.id));
+      }
+    } catch (error) {
+      console.error("Error deleting policy:", error);
     }
   }
 
@@ -140,24 +241,32 @@ export default function PoliciesPage() {
     }).format(amount);
   };
 
+  const isDialogOpen = createOpen || editPolicy !== null;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold text-slate-900">Policies</h1>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          if (!open) {
+            setCreateOpen(false);
+            setEditPolicy(null);
+            resetForm();
+          }
+        }}>
           <DialogTrigger asChild>
-            <Button>Create Policy</Button>
+            <Button onClick={() => setCreateOpen(true)}>Create Policy</Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Create New Policy</DialogTitle>
+              <DialogTitle>{editPolicy ? "Edit Policy" : "Create New Policy"}</DialogTitle>
               <DialogDescription>
                 Define spending rules for your AI agents.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
               <div className="space-y-2">
-                <Label htmlFor="policy-name">Policy Name</Label>
+                <Label htmlFor="policy-name">Policy Name *</Label>
                 <Input
                   id="policy-name"
                   placeholder="Monthly Budget Limit"
@@ -166,7 +275,7 @@ export default function PoliciesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">Description (optional)</Label>
+                <Label htmlFor="description">Description</Label>
                 <Input
                   id="description"
                   placeholder="Limits monthly spending for all agents"
@@ -197,6 +306,24 @@ export default function PoliciesPage() {
                 </div>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="allowlist">Merchant Allowlist (comma-separated)</Label>
+                <Input
+                  id="allowlist"
+                  placeholder="figma, github, aws"
+                  value={formData.merchantAllowlist}
+                  onChange={(e) => setFormData({ ...formData, merchantAllowlist: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="blocklist">Merchant Blocklist (comma-separated)</Label>
+                <Input
+                  id="blocklist"
+                  placeholder="facebook ads, google ads"
+                  value={formData.merchantBlocklist}
+                  onChange={(e) => setFormData({ ...formData, merchantBlocklist: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label>Default Action</Label>
                 <div className="flex gap-2">
                   {["approve", "reject", "require_approval"].map((action) => (
@@ -214,8 +341,15 @@ export default function PoliciesPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={createPolicy} disabled={creating || !formData.name.trim()}>
-                {creating ? "Creating..." : "Create Policy"}
+              <Button variant="outline" onClick={() => {
+                setCreateOpen(false);
+                setEditPolicy(null);
+                resetForm();
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={savePolicy} disabled={saving || !formData.name.trim()}>
+                {saving ? "Saving..." : editPolicy ? "Update Policy" : "Create Policy"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -241,6 +375,7 @@ export default function PoliciesPage() {
                   <TableHead>Limits</TableHead>
                   <TableHead>Action</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -272,9 +407,34 @@ export default function PoliciesPage() {
                     </TableCell>
                     <TableCell>{getActionBadge(policy.action)}</TableCell>
                     <TableCell>
-                      <Badge variant={policy.enabled ? "default" : "secondary"}>
+                      <Badge 
+                        variant={policy.enabled ? "default" : "secondary"}
+                        className={policy.enabled ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100" : ""}
+                      >
                         {policy.enabled ? "Enabled" : "Disabled"}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">•••</Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEditDialog(policy)}>
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => togglePolicyEnabled(policy)}>
+                            {policy.enabled ? "Disable" : "Enable"}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            className="text-red-600"
+                            onClick={() => deletePolicy(policy)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useSession } from "next-auth/react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,33 +9,77 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export default function SettingsPage() {
-  const { data: session } = useSession();
-  const [stripeConnected, setStripeConnected] = useState(false);
+interface StripeStatus {
+  connected: boolean;
+  status?: string;
+  accountId?: string;
+  connectedAt?: string;
+}
 
-  const handleConnectStripe = async () => {
-    // In production, this would redirect to Stripe Connect OAuth
-    const redirectUrl = `${window.location.origin}/api/stripe/connect/callback`;
-    const state = Math.random().toString(36).substring(7);
+export default function SettingsPage() {
+  const searchParams = useSearchParams();
+  const [stripeStatus, setStripeStatus] = useState<StripeStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [disconnecting, setDisconnecting] = useState(false);
+  
+  const successMessage = searchParams.get("success");
+  const errorMessage = searchParams.get("error");
+
+  useEffect(() => {
+    fetchStripeStatus();
+  }, []);
+
+  async function fetchStripeStatus() {
+    try {
+      const res = await fetch("/api/stripe/connect/status");
+      if (res.ok) {
+        const data = await res.json();
+        setStripeStatus(data);
+      }
+    } catch (error) {
+      console.error("Error fetching Stripe status:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleConnectStripe = () => {
+    window.location.href = "/api/stripe/connect";
+  };
+
+  const handleDisconnectStripe = async () => {
+    if (!confirm("Are you sure you want to disconnect Stripe? This will disable virtual card creation.")) {
+      return;
+    }
     
-    // Store state for verification
-    sessionStorage.setItem("stripe_oauth_state", state);
-    
-    // Redirect to Stripe Connect
-    const stripeConnectUrl = new URL("https://connect.stripe.com/oauth/authorize");
-    stripeConnectUrl.searchParams.set("response_type", "code");
-    stripeConnectUrl.searchParams.set("client_id", process.env.NEXT_PUBLIC_STRIPE_CONNECT_CLIENT_ID || "");
-    stripeConnectUrl.searchParams.set("scope", "read_write");
-    stripeConnectUrl.searchParams.set("redirect_uri", redirectUrl);
-    stripeConnectUrl.searchParams.set("state", state);
-    
-    // For demo, just show an alert
-    alert("In production, this would redirect to Stripe Connect OAuth.\n\nSet NEXT_PUBLIC_STRIPE_CONNECT_CLIENT_ID in your environment to enable.");
+    setDisconnecting(true);
+    try {
+      const res = await fetch("/api/stripe/connect/status", { method: "DELETE" });
+      if (res.ok) {
+        setStripeStatus({ connected: false });
+      }
+    } catch (error) {
+      console.error("Error disconnecting Stripe:", error);
+    } finally {
+      setDisconnecting(false);
+    }
   };
 
   return (
     <div>
       <h1 className="text-3xl font-bold text-slate-900 mb-8">Settings</h1>
+
+      {successMessage && (
+        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg">
+          {successMessage}
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+          {errorMessage}
+        </div>
+      )}
 
       <Tabs defaultValue="stripe" className="space-y-6">
         <TabsList>
@@ -63,15 +107,24 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium">Stripe Account</p>
                     <p className="text-sm text-slate-500">
-                      {stripeConnected ? "Connected" : "Not connected"}
+                      {loading ? "Checking status..." : stripeStatus?.connected ? `Connected: ${stripeStatus.accountId}` : "Not connected"}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-3">
-                  {stripeConnected ? (
+                  {loading ? (
+                    <Badge variant="secondary">Loading...</Badge>
+                  ) : stripeStatus?.connected ? (
                     <>
-                      <Badge className="bg-emerald-100 text-emerald-700">Connected</Badge>
-                      <Button variant="outline" size="sm">Disconnect</Button>
+                      <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Connected</Badge>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={handleDisconnectStripe}
+                        disabled={disconnecting}
+                      >
+                        {disconnecting ? "Disconnecting..." : "Disconnect"}
+                      </Button>
                     </>
                   ) : (
                     <Button onClick={handleConnectStripe}>Connect Stripe</Button>
@@ -87,6 +140,20 @@ export default function SettingsPage() {
                   <li>• Business account (not individual)</li>
                 </ul>
               </div>
+
+              {!stripeStatus?.connected && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <h4 className="font-medium text-amber-900 mb-2">Configuration Required</h4>
+                  <p className="text-sm text-amber-800">
+                    To enable Stripe Connect, add these environment variables:
+                  </p>
+                  <ul className="text-sm text-amber-800 mt-2 space-y-1 font-mono">
+                    <li>• STRIPE_CONNECT_CLIENT_ID</li>
+                    <li>• STRIPE_SECRET_KEY</li>
+                    <li>• NEXT_PUBLIC_APP_URL</li>
+                  </ul>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -146,7 +213,7 @@ export default function SettingsPage() {
   -H "Authorization: Bearer YOUR_AGENT_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "agent_id": "agent_123",
+    "agent_id": "YOUR_AGENT_ID",
     "amount": 129.99,
     "currency": "usd",
     "description": "1 month Figma Professional",

@@ -23,6 +23,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Agent {
   id: string;
@@ -36,8 +43,10 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
+  const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAgents();
@@ -60,7 +69,7 @@ export default function AgentsPage() {
   async function createAgent() {
     if (!newAgentName.trim()) return;
     
-    setCreating(true);
+    setSaving(true);
     try {
       const res = await fetch("/api/internal/agents", {
         method: "POST",
@@ -73,11 +82,13 @@ export default function AgentsPage() {
         setNewApiKey(data.apiKey);
         setAgents([...agents, data.agent]);
         setNewAgentName("");
+        setCreateOpen(false);
+        setApiKeyDialogOpen(true);
       }
     } catch (error) {
       console.error("Error creating agent:", error);
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   }
 
@@ -100,6 +111,47 @@ export default function AgentsPage() {
     }
   }
 
+  async function deleteAgent(agent: Agent) {
+    if (!confirm(`Are you sure you want to delete "${agent.name}"? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/internal/agents/${agent.id}`, {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        setAgents(agents.filter(a => a.id !== agent.id));
+      }
+    } catch (error) {
+      console.error("Error deleting agent:", error);
+    }
+  }
+
+  async function regenerateApiKey(agent: Agent) {
+    if (!confirm(`Are you sure you want to regenerate the API key for "${agent.name}"? The old key will stop working immediately.`)) {
+      return;
+    }
+
+    setRegeneratingId(agent.id);
+    try {
+      const res = await fetch(`/api/internal/agents/${agent.id}/regenerate-key`, {
+        method: "POST",
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setNewApiKey(data.apiKey);
+        setApiKeyDialogOpen(true);
+      }
+    } catch (error) {
+      console.error("Error regenerating API key:", error);
+    } finally {
+      setRegeneratingId(null);
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "active":
@@ -117,60 +169,77 @@ export default function AgentsPage() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold text-slate-900">Agents</h1>
-        <Dialog open={createOpen} onOpenChange={(open) => {
-          setCreateOpen(open);
-          if (!open) {
-            setNewApiKey(null);
-            setNewAgentName("");
-          }
-        }}>
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button>Create Agent</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{newApiKey ? "Agent Created!" : "Create New Agent"}</DialogTitle>
+              <DialogTitle>Create New Agent</DialogTitle>
               <DialogDescription>
-                {newApiKey 
-                  ? "Save this API key now. You won't be able to see it again."
-                  : "Give your agent a name to identify it."}
+                Give your agent a name to identify it. You&apos;ll receive an API key after creation.
               </DialogDescription>
             </DialogHeader>
-            {newApiKey ? (
-              <div className="space-y-4">
-                <div className="p-4 bg-slate-100 rounded-lg">
-                  <Label className="text-xs text-slate-500">API Key</Label>
-                  <code className="block mt-1 text-sm break-all font-mono">{newApiKey}</code>
-                </div>
-                <Button onClick={() => {
-                  navigator.clipboard.writeText(newApiKey);
-                }} variant="outline" className="w-full">
-                  Copy to Clipboard
-                </Button>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Agent Name</Label>
+                <Input
+                  id="name"
+                  placeholder="My AI Agent"
+                  value={newAgentName}
+                  onChange={(e) => setNewAgentName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createAgent()}
+                />
               </div>
-            ) : (
-              <>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Agent Name</Label>
-                    <Input
-                      id="name"
-                      placeholder="My AI Agent"
-                      value={newAgentName}
-                      onChange={(e) => setNewAgentName(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button onClick={createAgent} disabled={creating || !newAgentName.trim()}>
-                    {creating ? "Creating..." : "Create Agent"}
-                  </Button>
-                </DialogFooter>
-              </>
-            )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={createAgent} disabled={saving || !newAgentName.trim()}>
+                {saving ? "Creating..." : "Create Agent"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* API Key Dialog */}
+      <Dialog open={apiKeyDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setNewApiKey(null);
+        }
+        setApiKeyDialogOpen(open);
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>API Key Generated</DialogTitle>
+            <DialogDescription>
+              Save this API key now. You won&apos;t be able to see it again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="p-4 bg-slate-100 rounded-lg">
+              <Label className="text-xs text-slate-500">API Key</Label>
+              <code className="block mt-1 text-sm break-all font-mono select-all">{newApiKey}</code>
+            </div>
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => {
+                  if (newApiKey) navigator.clipboard.writeText(newApiKey);
+                }} 
+                variant="outline" 
+                className="flex-1"
+              >
+                Copy to Clipboard
+              </Button>
+              <Button onClick={() => setApiKeyDialogOpen(false)} className="flex-1">
+                Done
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader>
@@ -181,12 +250,16 @@ export default function AgentsPage() {
           {loading ? (
             <p className="text-sm text-slate-500">Loading...</p>
           ) : agents.length === 0 ? (
-            <p className="text-sm text-slate-500">No agents yet. Create your first agent to get started.</p>
+            <div className="text-center py-8">
+              <p className="text-sm text-slate-500 mb-4">No agents yet. Create your first agent to get started.</p>
+              <Button onClick={() => setCreateOpen(true)}>Create Your First Agent</Button>
+            </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>ID</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -196,18 +269,34 @@ export default function AgentsPage() {
                 {agents.map((agent) => (
                   <TableRow key={agent.id}>
                     <TableCell className="font-medium">{agent.name}</TableCell>
+                    <TableCell className="font-mono text-xs text-slate-500">{agent.id}</TableCell>
                     <TableCell>{getStatusBadge(agent.status)}</TableCell>
                     <TableCell className="text-slate-500">
                       {new Date(agent.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => toggleAgentStatus(agent)}
-                      >
-                        {agent.status === "active" ? "Pause" : "Activate"}
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" disabled={regeneratingId === agent.id}>
+                            {regeneratingId === agent.id ? "..." : "•••"}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => toggleAgentStatus(agent)}>
+                            {agent.status === "active" ? "Pause" : "Activate"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => regenerateApiKey(agent)}>
+                            Regenerate API Key
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            className="text-red-600"
+                            onClick={() => deleteAgent(agent)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
