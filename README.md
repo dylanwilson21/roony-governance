@@ -13,10 +13,17 @@ Roony is a financial firewall for AI agents. It sits between your agents and you
 - **Full Audit Trail**: Track all transactions, approvals, and rejections
 - **Professional Dashboard**: Blue/white financial professional UI with shadcn/ui
 
+## Current Status
+
+**MVP Complete** ✅ - The application is fully functional and ready for testing.
+
+See **[Development Status](docs/DEVELOPMENT_STATUS.md)** for detailed information on what's built, file structure, and how to test.
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs/` directory:
 
+- **[Development Status](docs/DEVELOPMENT_STATUS.md)** - Current state, what's built, how to test
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture, data flow, component relationships
 - **[API Documentation](docs/API.md)** - API specifications for agent endpoints and internal APIs
 - **[Policy Engine](docs/POLICY_ENGINE.md)** - Policy engine design, rule DSL, evaluation logic
@@ -55,7 +62,7 @@ cp .env.example .env.local
 
 4. Set up the database:
 ```bash
-npm run db:migrate
+npm run db:push
 ```
 
 5. Start the development server:
