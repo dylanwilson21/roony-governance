@@ -40,7 +40,7 @@ Roony exposes the following tools via MCP:
 
 ### 1. `request_purchase`
 
-Request approval for a purchase. If approved, returns a virtual card.
+Request approval for a purchase. If approved, returns a virtual card. May return `pending_approval` if the purchase needs human review.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
@@ -70,7 +70,7 @@ Request approval for a purchase. If approved, returns a virtual card.
 }
 ```
 
-**Success Response:**
+**Success Response (Approved):**
 ```json
 {
   "status": "approved",
@@ -85,7 +85,18 @@ Request approval for a purchase. If approved, returns a virtual card.
   "hard_limit_amount": 49.99,
   "currency": "usd",
   "expires_at": "2025-11-29T12:00:00Z",
+  "purchase_intent_id": "uuid",
   "message": "Purchase approved. Use this card to complete your purchase."
+}
+```
+
+**Pending Approval Response:**
+```json
+{
+  "status": "pending_approval",
+  "message": "Amount $150.00 exceeds approval threshold of $100.00",
+  "purchase_intent_id": "uuid",
+  "suggestion": "A human administrator will review this request. You'll be notified of the decision."
 }
 ```
 
@@ -101,12 +112,12 @@ Request approval for a purchase. If approved, returns a virtual card.
 
 ### 2. `check_budget`
 
-Check remaining budget and spending limits.
+Check remaining budget, spending limits, and organization budget.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `period` | string | ❌ | "daily", "weekly", "monthly", or "all" (default: "all") |
+| `period` | string | ❌ | "daily", "monthly", or "all" (default: "all") |
 
 **Example:**
 ```json
@@ -116,21 +127,52 @@ Check remaining budget and spending limits.
   "method": "tools/call",
   "params": {
     "name": "check_budget",
-    "arguments": {
-      "period": "monthly"
-    }
+    "arguments": {}
   }
 }
 ```
 
-**Response:**
+**Response (all periods):**
 ```json
 {
-  "agent_id": "agent_123",
+  "agent_id": "uuid",
+  "agent_name": "Research Bot",
+  "currency": "usd",
+  "limits": {
+    "per_transaction": 50,
+    "daily": 100,
+    "monthly": 500
+  },
+  "current_spend": {
+    "daily": 25.00,
+    "monthly": 350.50
+  },
+  "remaining": {
+    "daily": 75.00,
+    "monthly": 149.50
+  },
+  "organization": {
+    "monthly_budget": 10000,
+    "org_spent": 7200,
+    "org_remaining": 2800,
+    "percent_used": "72.0%"
+  },
+  "controls": {
+    "approval_threshold": 100,
+    "flag_new_vendors": true,
+    "has_merchant_restrictions": false
+  }
+}
+```
+
+**Response (single period):**
+```json
+{
+  "agent_id": "uuid",
   "period": "monthly",
-  "limit": 1000,
+  "limit": 500,
   "spent": 350.50,
-  "remaining": 649.50
+  "remaining": 149.50
 }
 ```
 
@@ -142,7 +184,7 @@ List recent transactions for this agent.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `limit` | number | ❌ | Max transactions to return (default: 10, max: 50) |
-| `status` | string | ❌ | Filter: "approved", "rejected", "pending", "all" |
+| `status` | string | ❌ | Filter: "approved", "rejected", "pending_approval", "all" |
 
 **Example:**
 ```json
@@ -160,9 +202,29 @@ List recent transactions for this agent.
 }
 ```
 
+**Response:**
+```json
+{
+  "agent_id": "uuid",
+  "count": 5,
+  "transactions": [
+    {
+      "id": "uuid",
+      "amount": 49.99,
+      "currency": "usd",
+      "description": "Monthly subscription",
+      "merchant": "GitHub",
+      "status": "approved",
+      "rejection_reason": null,
+      "timestamp": "2025-11-28T10:00:00Z"
+    }
+  ]
+}
+```
+
 ### 4. `get_policy_info`
 
-Get information about spending policies that apply to this agent.
+Get information about spending controls that apply to this agent.
 
 **Parameters:** None
 
@@ -176,6 +238,37 @@ Get information about spending policies that apply to this agent.
     "name": "get_policy_info",
     "arguments": {}
   }
+}
+```
+
+**Response:**
+```json
+{
+  "agent_id": "uuid",
+  "agent_name": "Research Bot",
+  "agent_controls": {
+    "spending_limits": {
+      "per_transaction": 50,
+      "daily": 100,
+      "monthly": 500
+    },
+    "approval_rules": {
+      "threshold": "Purchases over $100 require human approval",
+      "new_vendors": "Purchases from new vendors require human approval"
+    },
+    "merchant_restrictions": {
+      "blocked": ["facebook ads"],
+      "allowed_only": "any merchant"
+    }
+  },
+  "organization_guardrails": {
+    "monthly_budget": 10000,
+    "max_transaction": 1000,
+    "require_approval_above": 500,
+    "flag_all_new_vendors": false,
+    "blocked_categories": ["gambling"]
+  },
+  "summary": "You have a monthly budget of $500, max $50 per transaction, purchases over $100 need approval, new vendors require approval."
 }
 ```
 
@@ -245,9 +338,12 @@ const client = new Client({
 
 await client.connect(transport);
 
-// List available tools
-const tools = await client.listTools();
-console.log(tools);
+// Check budget first
+const budget = await client.callTool({
+  name: "check_budget",
+  arguments: {}
+});
+console.log("Budget:", budget);
 
 // Request a purchase
 const result = await client.callTool({
@@ -260,7 +356,13 @@ const result = await client.callTool({
   }
 });
 
-console.log(result);
+if (result.status === "approved") {
+  console.log("Card number:", result.card.number);
+} else if (result.status === "pending_approval") {
+  console.log("Waiting for approval:", result.message);
+} else {
+  console.log("Rejected:", result.message);
+}
 ```
 
 ### Connecting from a Workflow Builder
@@ -295,13 +397,6 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 
 *Note: For production use, consider using a proper MCP client library instead of curl.*
 
-### Using with OpenAI Assistants
-
-While OpenAI doesn't natively support MCP, you can:
-
-1. Create a function that wraps the MCP call
-2. Use the Roony REST API directly (see API.md)
-
 ## Error Handling
 
 MCP errors follow the JSON-RPC 2.0 error format:
@@ -333,22 +428,21 @@ When a purchase is rejected, the `reason_code` indicates why:
 
 | Code | Description |
 |------|-------------|
-| `AMOUNT_TOO_HIGH` | Exceeds per-transaction limit |
-| `DAILY_LIMIT_EXCEEDED` | Daily budget exceeded |
-| `WEEKLY_LIMIT_EXCEEDED` | Weekly budget exceeded |
-| `MONTHLY_LIMIT_EXCEEDED` | Monthly budget exceeded |
-| `LIFETIME_LIMIT_EXCEEDED` | Lifetime budget exceeded |
-| `MERCHANT_NOT_ALLOWED` | Merchant not on allowlist |
-| `MERCHANT_BLOCKED` | Merchant is blocklisted |
-| `TIME_RESTRICTED` | Outside allowed hours |
-| `NO_POLICY` | No policy configured |
-| `AGENT_PAUSED` | Agent is paused |
+| `OVER_TRANSACTION_LIMIT` | Exceeds agent's per-transaction limit |
+| `OVER_ORG_MAX_TRANSACTION` | Exceeds org's max transaction amount |
+| `DAILY_LIMIT_EXCEEDED` | Agent's daily budget exceeded |
+| `MONTHLY_LIMIT_EXCEEDED` | Agent's monthly budget exceeded |
+| `ORG_BUDGET_EXCEEDED` | Organization's monthly budget exceeded |
+| `MERCHANT_NOT_ALLOWED` | Merchant not on agent's allowed list |
+| `MERCHANT_BLOCKED` | Merchant is blocked by agent |
+| `CATEGORY_BLOCKED` | Matches org's blocked category |
+| `AGENT_NOT_FOUND` | Agent doesn't exist |
 
 ## Best Practices
 
 1. **Check budget before purchasing**: Call `check_budget` to verify you have sufficient budget before attempting a purchase.
 
-2. **Handle rejections gracefully**: Parse the `reason_code` and `suggestion` to provide helpful feedback to users.
+2. **Handle all three statuses**: A purchase can be `approved`, `pending_approval`, or `rejected`. Handle each case appropriately.
 
 3. **Use project IDs**: Include `project_id` in purchases for better spend tracking and reporting.
 
@@ -356,12 +450,15 @@ When a purchase is rejected, the `reason_code` indicates why:
 
 5. **Implement retries**: For network errors, implement exponential backoff retry logic.
 
+6. **Handle pending approvals**: If status is `pending_approval`, inform the user that a human will review the request.
+
 ## Security Considerations
 
 - API keys authenticate at the agent level
-- Each agent has its own policies and budget limits
+- Each agent has its own spending limits
 - Virtual cards are single-use and amount-limited
 - All transactions are logged for audit
+- Pending approvals require human review
 
 ## Testing
 
@@ -385,5 +482,10 @@ curl -X POST http://localhost:3000/api/mcp \
   -H "Authorization: Bearer rk_your_api_key" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check_budget","arguments":{}}}'
-```
 
+# Request purchase
+curl -X POST http://localhost:3000/api/mcp \
+  -H "Authorization: Bearer rk_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"request_purchase","arguments":{"amount":25,"currency":"usd","description":"Test","merchant_name":"Test Co"}}}'
+```

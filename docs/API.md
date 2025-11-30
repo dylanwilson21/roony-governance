@@ -70,9 +70,6 @@ Content-Type: application/json
 | `metadata` | ❌ | Additional metadata |
 | `agent_id` | ❌ | Optional - uses authenticated agent if omitted |
 
-**Note:** The `agent_id` field is optional. The agent is identified by the API key in the Authorization header.
-```
-
 **Success Response (200):**
 ```json
 {
@@ -91,6 +88,15 @@ Content-Type: application/json
 }
 ```
 
+**Pending Approval Response (200):**
+```json
+{
+  "status": "pending_approval",
+  "message": "Amount $150.00 exceeds approval threshold of $100.00",
+  "purchase_intent_id": "uuid"
+}
+```
+
 **Rejection Response (200):**
 ```json
 {
@@ -106,16 +112,20 @@ Content-Type: application/json
 - `500 Internal Server Error` - Server error
 
 **Rejection Reason Codes:**
-- `NO_POLICY` - No policy configured for this agent
-- `AMOUNT_TOO_HIGH` - Exceeds per-transaction limit
-- `DAILY_LIMIT_EXCEEDED` - Daily spend limit exceeded
-- `WEEKLY_LIMIT_EXCEEDED` - Weekly spend limit exceeded
-- `MONTHLY_LIMIT_EXCEEDED` - Monthly spend limit exceeded
-- `LIFETIME_LIMIT_EXCEEDED` - Lifetime spend limit exceeded
-- `MERCHANT_NOT_ALLOWED` - Merchant blocked or not in allowlist
-- `TIME_RESTRICTED` - Outside allowed hours
-- `AGENT_PAUSED` - Agent is paused
-- `NO_STRIPE_CONNECTION` - Stripe not connected
+| Code | Description |
+|------|-------------|
+| `OVER_TRANSACTION_LIMIT` | Exceeds agent's per-transaction limit |
+| `OVER_ORG_MAX_TRANSACTION` | Exceeds org's max transaction amount |
+| `DAILY_LIMIT_EXCEEDED` | Agent's daily limit exceeded |
+| `MONTHLY_LIMIT_EXCEEDED` | Agent's monthly limit exceeded |
+| `ORG_BUDGET_EXCEEDED` | Organization's monthly budget exceeded |
+| `MERCHANT_BLOCKED` | Merchant is blocked by agent |
+| `MERCHANT_NOT_ALLOWED` | Merchant not in agent's allowed list |
+| `CATEGORY_BLOCKED` | Matches org's blocked category |
+| `AGENT_NOT_FOUND` | Agent doesn't exist |
+| `NO_STRIPE_CONNECTION` | Stripe not connected |
+| `STRIPE_CONNECTION_INACTIVE` | Stripe connection inactive |
+| `CARD_CREATION_FAILED` | Failed to create virtual card |
 
 ---
 
@@ -126,7 +136,7 @@ All internal APIs require authentication via NextAuth.js session.
 ### Agents
 
 #### GET /api/internal/agents
-List all agents for the organization.
+List all agents for the organization with spending controls.
 
 **Response:**
 ```json
@@ -135,7 +145,15 @@ List all agents for the organization.
     {
       "id": "uuid",
       "name": "Research Agent",
+      "description": "Handles research tasks",
       "status": "active",
+      "monthlyLimit": 500,
+      "dailyLimit": 100,
+      "perTransactionLimit": 50,
+      "approvalThreshold": 25,
+      "flagNewVendors": true,
+      "blockedMerchants": ["facebook ads"],
+      "allowedMerchants": null,
       "createdAt": "2025-11-28T00:00:00Z"
     }
   ]
@@ -143,12 +161,20 @@ List all agents for the organization.
 ```
 
 #### POST /api/internal/agents
-Create a new agent.
+Create a new agent with spending controls.
 
 **Request:**
 ```json
 {
-  "name": "My Agent"
+  "name": "My Agent",
+  "description": "Description",
+  "monthlyLimit": 500,
+  "dailyLimit": 100,
+  "perTransactionLimit": 50,
+  "approvalThreshold": 25,
+  "flagNewVendors": true,
+  "blockedMerchants": ["facebook ads"],
+  "allowedMerchants": null
 }
 ```
 
@@ -164,13 +190,15 @@ Create a new agent.
 Get agent details.
 
 #### PUT /api/internal/agents/:id
-Update agent (name, status).
+Update agent settings and spending controls.
 
 **Request:**
 ```json
 {
   "name": "New Name",
-  "status": "paused"
+  "status": "paused",
+  "monthlyLimit": 600,
+  "approvalThreshold": 50
 }
 ```
 
@@ -190,66 +218,118 @@ Regenerate API key.
 
 ---
 
-### Policies
+### Approvals
 
-#### GET /api/internal/policies
-List all policies.
+#### GET /api/internal/approvals
+List pending approvals.
+
+**Query Parameters:**
+- `status`: "pending" | "approved" | "rejected" | "all" (default: "pending")
 
 **Response:**
 ```json
 {
-  "policies": [
+  "approvals": [
     {
       "id": "uuid",
-      "name": "Monthly Budget",
-      "scopeType": "org",
-      "scopeIds": [],
-      "rules": {
-        "budget": {
-          "monthlyLimit": 1000,
-          "perTransactionLimit": 100
-        },
-        "merchant": {
-          "allowlist": ["figma", "github"],
-          "blocklist": ["facebook ads"]
-        }
-      },
-      "action": "approve",
-      "enabled": true,
-      "priority": 0
+      "purchaseIntentId": "uuid",
+      "agentId": "uuid",
+      "agentName": "Research Agent",
+      "amount": 150.00,
+      "merchantName": "New SaaS Tool",
+      "reason": "OVER_THRESHOLD",
+      "reasonDetails": "Amount exceeds approval threshold",
+      "status": "pending",
+      "createdAt": "2025-11-28T00:00:00Z",
+      "description": "Monthly subscription",
+      "currency": "usd"
     }
-  ]
+  ],
+  "counts": {
+    "pending": 3,
+    "approved": 10,
+    "rejected": 2
+  }
 }
 ```
 
-#### POST /api/internal/policies
-Create a policy.
+#### PUT /api/internal/approvals/:id
+Approve or reject a pending approval.
 
 **Request:**
 ```json
 {
-  "name": "Monthly Budget",
-  "description": "Limit monthly spend",
-  "scopeType": "org",
-  "scopeIds": [],
-  "rules": {
-    "budget": {
-      "monthlyLimit": 1000,
-      "perTransactionLimit": 100
-    }
-  },
-  "action": "approve"
+  "action": "approve",
+  "notes": "Approved for Q4 budget"
 }
 ```
 
-#### GET /api/internal/policies/:id
-Get policy details.
+**Response:**
+```json
+{
+  "approval": { ... },
+  "message": "Purchase approved successfully"
+}
+```
 
-#### PUT /api/internal/policies/:id
-Update policy.
+---
 
-#### DELETE /api/internal/policies/:id
-Delete policy.
+### Organization Settings
+
+#### GET /api/internal/settings/organization
+Get organization settings including budget and guardrails.
+
+**Response:**
+```json
+{
+  "name": "Acme Corp",
+  "monthlyBudget": 10000,
+  "alertThreshold": 0.8,
+  "guardrails": {
+    "blockCategories": ["gambling"],
+    "requireApprovalAbove": 500,
+    "flagAllNewVendors": false,
+    "maxTransactionAmount": 1000
+  }
+}
+```
+
+#### PUT /api/internal/settings/organization
+Update organization settings.
+
+**Request:**
+```json
+{
+  "monthlyBudget": 15000,
+  "alertThreshold": 0.75,
+  "guardrails": {
+    "blockCategories": ["gambling", "adult"],
+    "requireApprovalAbove": 500,
+    "flagAllNewVendors": true,
+    "maxTransactionAmount": 1000
+  }
+}
+```
+
+---
+
+### Budget
+
+#### GET /api/internal/budget
+Get budget utilization info for dashboard.
+
+**Response:**
+```json
+{
+  "orgBudget": 10000,
+  "orgSpent": 7200,
+  "orgRemaining": 2800,
+  "percentUsed": 72,
+  "alertThreshold": 80,
+  "isOverThreshold": false,
+  "pendingApprovals": 3
+}
+```
 
 ---
 
@@ -292,7 +372,7 @@ Get dashboard analytics.
   "activeAgents": 3,
   "todayTransactions": 5,
   "blockedAttempts": 2,
-  "totalPolicies": 4,
+  "totalPolicies": 0,
   "monthlySpend": 800.00,
   "spendByAgent": [
     { "agentId": "uuid", "agentName": "Agent 1", "totalSpend": 500.00 }

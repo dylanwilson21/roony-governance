@@ -6,13 +6,34 @@ Roony is a financial firewall for AI agents. It sits between your agents and you
 
 ## Key Features
 
-- **Real-time Policy Evaluation**: Evaluate purchase requests against configurable policies
+- **Simplified Governance**: 2-level hierarchy (Organization → Agents) with spending controls directly on agents
+- **Real-time Spending Checks**: Evaluate purchase requests against agent limits and org guardrails
 - **Just-in-Time Virtual Cards**: Issue single-use, constrained virtual cards via Stripe Issuing
+- **Approval Queue**: Human review for purchases over thresholds or from new vendors
 - **MCP Protocol Support**: Native Model Context Protocol integration for AI agent platforms
 - **Secure Payment Infrastructure**: Stripe Connect OAuth flow (no raw API keys)
-- **Comprehensive Policy Engine**: Budget limits, merchant controls, MCC filtering, time-based rules
-- **Full Audit Trail**: Track all transactions, approvals, and rejections
+- **Budget Tracking**: Organization and agent-level budget utilization with alerts
 - **Professional Dashboard**: Blue/white financial professional UI with shadcn/ui
+
+## Governance Model
+
+```
+Organization
+├── Monthly Budget: $10,000
+├── Guardrails (apply to ALL agents)
+│   ├── Max transaction amount
+│   ├── Require approval above threshold
+│   └── Flag all new vendors
+│
+├── Agent "Research Bot"
+│   ├── Monthly limit: $500
+│   ├── Approval threshold: $100
+│   └── Flag new vendors: true
+│
+└── Agent "Code Assistant"
+    ├── Monthly limit: $300
+    └── Per-transaction max: $50
+```
 
 ## Current Status
 
@@ -28,7 +49,7 @@ Comprehensive documentation is available in the `docs/` directory:
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture, data flow, component relationships
 - **[API Documentation](docs/API.md)** - REST API specifications for agent endpoints
 - **[MCP Integration](docs/MCP_INTEGRATION.md)** - Model Context Protocol integration guide
-- **[Policy Engine](docs/POLICY_ENGINE.md)** - Policy engine design, rule DSL, evaluation logic
+- **[Spending Controls](docs/SPENDING_CONTROLS.md)** - Agent controls and org guardrails
 - **[Stripe Integration](docs/STRIPE_INTEGRATION.md)** - Stripe Connect setup, Issuing API usage
 - **[Database Schema](docs/DATABASE_SCHEMA.md)** - Database models, relationships, migrations
 - **[UI Components](docs/UI_COMPONENTS.md)** - Component library structure, design system
@@ -84,10 +105,10 @@ roony-governance/
 │   └── (dashboard)/         # Dashboard pages
 ├── components/              # React components
 │   ├── ui/                  # shadcn components
-│   └── dashboard/           # Dashboard components
+│   └── layout/              # Layout components
 ├── lib/                     # Core logic
+│   ├── spending/            # Spending checker
 │   ├── stripe/              # Stripe integration
-│   ├── policy-engine/       # Policy evaluation
 │   └── database/            # Database utilities
 ├── types/                   # TypeScript types
 └── public/                  # Static assets
@@ -95,12 +116,12 @@ roony-governance/
 
 ## Technology Stack
 
-- **Framework**: Next.js 14+ (App Router)
+- **Framework**: Next.js 16+ (App Router)
 - **Language**: TypeScript
 - **Database**: SQLite (development), PostgreSQL (production)
 - **ORM**: Drizzle ORM
 - **Payments**: Stripe (Connect + Issuing)
-- **UI**: React, shadcn/ui, Tailwind CSS
+- **UI**: React 18, shadcn/ui, Tailwind CSS
 - **Authentication**: NextAuth.js
 
 ## Development
@@ -115,19 +136,20 @@ npm run build        # Build for production
 npm run start        # Start production server
 npm run lint         # Run ESLint
 npm run type-check   # Check TypeScript
-npm run db:migrate   # Run database migrations
+npm run db:push      # Push schema to database
 npm run db:studio    # Open database studio
 ```
 
 ## How It Works
 
-1. **Connect Stripe**: Customer connects their Stripe account via OAuth (no raw API keys)
-2. **Define Policies**: Configure spending rules, budgets, merchant allowlists/blocklists
-3. **Agent Requests Purchase**: Agent calls the API (REST or MCP) with purchase details
-4. **Policy Evaluation**: Roony evaluates request against all applicable policies
-5. **Card Creation**: If approved, create just-in-time virtual card via Stripe Issuing
-6. **Transaction Monitoring**: Track authorizations and settlements via webhooks
-7. **Dashboard**: Monitor spend, review transactions, manage policies and agents
+1. **Connect Stripe**: Customer connects their Stripe account via OAuth
+2. **Set Organization Budget**: Configure monthly budget and guardrails
+3. **Create Agents**: Define agents with spending limits and controls
+4. **Agent Requests Purchase**: Agent calls API with purchase details
+5. **Spending Check**: Roony checks agent limits → org guardrails → approval rules
+6. **Card Creation**: If approved, create just-in-time virtual card
+7. **Approval Queue**: Flagged purchases go to human review
+8. **Dashboard**: Monitor spend, review approvals, manage agents
 
 ## Integration Options
 
