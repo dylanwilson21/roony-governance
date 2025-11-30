@@ -16,17 +16,54 @@ interface StripeStatus {
   connectedAt?: string;
 }
 
+interface OrgSettings {
+  name: string;
+  monthlyBudget: number | null;
+  alertThreshold: number;
+  guardrails: {
+    blockCategories?: string[];
+    requireApprovalAbove?: number | null;
+    flagAllNewVendors?: boolean;
+    maxTransactionAmount?: number | null;
+  };
+}
+
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const [stripeStatus, setStripeStatus] = useState<StripeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  
+  // Organization settings state
+  const [orgSettings, setOrgSettings] = useState<OrgSettings>({
+    name: "",
+    monthlyBudget: null,
+    alertThreshold: 80,
+    guardrails: {
+      blockCategories: [],
+      requireApprovalAbove: null,
+      flagAllNewVendors: false,
+      maxTransactionAmount: null,
+    },
+  });
+  
+  // Form state for guardrails
+  const [budgetForm, setBudgetForm] = useState({
+    monthlyBudget: "",
+    alertThreshold: "80",
+    blockCategories: "",
+    requireApprovalAbove: "",
+    flagAllNewVendors: false,
+    maxTransactionAmount: "",
+  });
   
   const successMessage = searchParams.get("success");
   const errorMessage = searchParams.get("error");
 
   useEffect(() => {
     fetchStripeStatus();
+    fetchOrgSettings();
   }, []);
 
   async function fetchStripeStatus() {
@@ -40,6 +77,26 @@ export default function SettingsPage() {
       console.error("Error fetching Stripe status:", error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchOrgSettings() {
+    try {
+      const res = await fetch("/api/internal/settings/organization");
+      if (res.ok) {
+        const data = await res.json();
+        setOrgSettings(data);
+        setBudgetForm({
+          monthlyBudget: data.monthlyBudget?.toString() || "",
+          alertThreshold: ((data.alertThreshold || 0.8) * 100).toString(),
+          blockCategories: data.guardrails?.blockCategories?.join(", ") || "",
+          requireApprovalAbove: data.guardrails?.requireApprovalAbove?.toString() || "",
+          flagAllNewVendors: data.guardrails?.flagAllNewVendors || false,
+          maxTransactionAmount: data.guardrails?.maxTransactionAmount?.toString() || "",
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching org settings:", error);
     }
   }
 
@@ -65,6 +122,47 @@ export default function SettingsPage() {
     }
   };
 
+  async function saveGuardrails() {
+    setSaving(true);
+    try {
+      const payload = {
+        monthlyBudget: budgetForm.monthlyBudget ? parseFloat(budgetForm.monthlyBudget) : null,
+        alertThreshold: parseFloat(budgetForm.alertThreshold) / 100,
+        guardrails: {
+          blockCategories: budgetForm.blockCategories 
+            ? budgetForm.blockCategories.split(",").map(s => s.trim()).filter(Boolean)
+            : [],
+          requireApprovalAbove: budgetForm.requireApprovalAbove 
+            ? parseFloat(budgetForm.requireApprovalAbove) 
+            : null,
+          flagAllNewVendors: budgetForm.flagAllNewVendors,
+          maxTransactionAmount: budgetForm.maxTransactionAmount 
+            ? parseFloat(budgetForm.maxTransactionAmount) 
+            : null,
+        },
+      };
+
+      const res = await fetch("/api/internal/settings/organization", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setOrgSettings(data);
+        alert("Settings saved successfully!");
+      } else {
+        alert("Failed to save settings");
+      }
+    } catch (error) {
+      console.error("Error saving settings:", error);
+      alert("Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div>
       <h1 className="text-3xl font-bold text-slate-900 mb-8">Settings</h1>
@@ -81,12 +179,131 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <Tabs defaultValue="stripe" className="space-y-6">
+      <Tabs defaultValue="guardrails" className="space-y-6">
         <TabsList>
+          <TabsTrigger value="guardrails">Spending Guardrails</TabsTrigger>
           <TabsTrigger value="stripe">Stripe Connection</TabsTrigger>
-          <TabsTrigger value="organization">Organization</TabsTrigger>
-          <TabsTrigger value="api">API Keys</TabsTrigger>
+          <TabsTrigger value="api">API Configuration</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="guardrails">
+          <div className="space-y-6">
+            {/* Organization Budget */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Organization Budget</CardTitle>
+                <CardDescription>
+                  Set the total monthly budget for your organization. All agent spend counts toward this.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="monthlyBudget">Monthly Budget ($)</Label>
+                    <Input
+                      id="monthlyBudget"
+                      type="number"
+                      placeholder="10000"
+                      value={budgetForm.monthlyBudget}
+                      onChange={(e) => setBudgetForm({ ...budgetForm, monthlyBudget: e.target.value })}
+                    />
+                    <p className="text-xs text-slate-500">Total spending limit per month for all agents</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="alertThreshold">Alert at % Used</Label>
+                    <Input
+                      id="alertThreshold"
+                      type="number"
+                      placeholder="80"
+                      value={budgetForm.alertThreshold}
+                      onChange={(e) => setBudgetForm({ ...budgetForm, alertThreshold: e.target.value })}
+                    />
+                    <p className="text-xs text-slate-500">Show warning when budget reaches this %</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Guardrails */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Organization Guardrails</CardTitle>
+                <CardDescription>
+                  These rules apply to ALL agents in your organization, in addition to any agent-specific controls.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="maxTransaction">Maximum Transaction Amount ($)</Label>
+                  <Input
+                    id="maxTransaction"
+                    type="number"
+                    placeholder="1000"
+                    value={budgetForm.maxTransactionAmount}
+                    onChange={(e) => setBudgetForm({ ...budgetForm, maxTransactionAmount: e.target.value })}
+                  />
+                  <p className="text-xs text-slate-500">Hard cap on any single transaction (blocks purchases above this)</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="requireApproval">Require Approval Above ($)</Label>
+                  <Input
+                    id="requireApproval"
+                    type="number"
+                    placeholder="500"
+                    value={budgetForm.requireApprovalAbove}
+                    onChange={(e) => setBudgetForm({ ...budgetForm, requireApprovalAbove: e.target.value })}
+                  />
+                  <p className="text-xs text-slate-500">All purchases above this amount need human approval</p>
+                </div>
+
+                <div className="flex items-center space-x-2 py-2">
+                  <input
+                    type="checkbox"
+                    id="flagNewVendors"
+                    checked={budgetForm.flagAllNewVendors}
+                    onChange={(e) => setBudgetForm({ ...budgetForm, flagAllNewVendors: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  <Label htmlFor="flagNewVendors" className="text-sm font-normal cursor-pointer">
+                    Require approval for all purchases from new vendors
+                  </Label>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="blockCategories">Block Categories / Merchants</Label>
+                  <Input
+                    id="blockCategories"
+                    placeholder="gambling, adult, facebook ads"
+                    value={budgetForm.blockCategories}
+                    onChange={(e) => setBudgetForm({ ...budgetForm, blockCategories: e.target.value })}
+                  />
+                  <p className="text-xs text-slate-500">Comma-separated list of blocked categories or merchant keywords</p>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <Button onClick={saveGuardrails} disabled={saving}>
+                    {saving ? "Saving..." : "Save Guardrails"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Info Card */}
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="pt-6">
+                <h4 className="font-medium text-blue-900 mb-2">How Guardrails Work</h4>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• Organization guardrails apply to ALL agents</li>
+                  <li>• Agent-specific controls are checked FIRST, then org guardrails</li>
+                  <li>• A purchase must pass BOTH agent and org checks</li>
+                  <li>• Blocked categories/merchants are rejected immediately</li>
+                  <li>• Approval thresholds send purchases to the review queue</li>
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
         <TabsContent value="stripe">
           <Card>
@@ -158,51 +375,49 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="organization">
-          <Card>
-            <CardHeader>
-              <CardTitle>Organization Settings</CardTitle>
-              <CardDescription>
-                Manage your organization details and preferences.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="org-name">Organization Name</Label>
-                <Input id="org-name" placeholder="My Organization" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="org-email">Contact Email</Label>
-                <Input id="org-email" type="email" placeholder="admin@example.com" />
-              </div>
-              <Button>Save Changes</Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         <TabsContent value="api">
           <Card>
             <CardHeader>
               <CardTitle>API Configuration</CardTitle>
               <CardDescription>
-                Configure API settings and view your organization&apos;s API endpoint.
+                Configure API settings and view your organization&apos;s API endpoints.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label>API Endpoint</Label>
-                <div className="flex items-center space-x-2">
-                  <Input 
-                    readOnly 
-                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/purchase_intent`}
-                    className="font-mono text-sm"
-                  />
-                  <Button 
-                    variant="outline" 
-                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/api/v1/purchase_intent`)}
-                  >
-                    Copy
-                  </Button>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>REST API Endpoint</Label>
+                  <div className="flex items-center space-x-2">
+                    <Input 
+                      readOnly 
+                      value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/purchase_intent`}
+                      className="font-mono text-sm"
+                    />
+                    <Button 
+                      variant="outline" 
+                      onClick={() => navigator.clipboard.writeText(`${window.location.origin}/api/v1/purchase_intent`)}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>MCP Protocol Endpoint</Label>
+                  <div className="flex items-center space-x-2">
+                    <Input 
+                      readOnly 
+                      value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/mcp`}
+                      className="font-mono text-sm"
+                    />
+                    <Button 
+                      variant="outline" 
+                      onClick={() => navigator.clipboard.writeText(`${window.location.origin}/api/mcp`)}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <p className="text-xs text-slate-500">For AI platforms that support Model Context Protocol</p>
                 </div>
               </div>
 
@@ -213,13 +428,11 @@ export default function SettingsPage() {
   -H "Authorization: Bearer YOUR_AGENT_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "agent_id": "YOUR_AGENT_ID",
     "amount": 129.99,
     "currency": "usd",
     "description": "1 month Figma Professional",
     "merchant": {
-      "name": "Figma",
-      "url": "https://www.figma.com/pricing"
+      "name": "Figma"
     }
   }'`}
                 </pre>

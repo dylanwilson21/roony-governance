@@ -1,11 +1,15 @@
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
-import { sql } from "drizzle-orm";
 
 // Organizations
 export const organizations = sqliteTable("organizations", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  // Budget settings
+  monthlyBudget: real("monthly_budget"), // Total org budget per month
+  alertThreshold: real("alert_threshold").default(0.8), // Alert at 80% by default
+  // Organization-wide guardrails (JSON)
+  guardrails: text("guardrails"), // JSON: { blockCategories, requireApprovalAbove, flagAllNewVendors, maxTransactionAmount }
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -22,16 +26,17 @@ export const users = sqliteTable("users", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-// Teams
+// Teams (for reporting/grouping only)
 export const teams = sqliteTable("teams", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   name: text("name").notNull(),
+  description: text("description"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-// Projects
+// Projects (optional grouping)
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
@@ -53,20 +58,47 @@ export const stripeConnections = sqliteTable("stripe_connections", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-// Agents
+// Agents - with spending controls directly on the agent
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   teamId: text("team_id").references(() => teams.id),
   projectId: text("project_id").references(() => projects.id),
   name: text("name").notNull(),
+  description: text("description"),
   apiKeyHash: text("api_key_hash").notNull(),
   status: text("status", { enum: ["active", "paused", "suspended"] }).notNull().default("active"),
+  
+  // Spending limits
+  monthlyLimit: real("monthly_limit"), // Max spend per month
+  dailyLimit: real("daily_limit"), // Max spend per day
+  perTransactionLimit: real("per_transaction_limit"), // Max per single transaction
+  
+  // Approval rules
+  approvalThreshold: real("approval_threshold"), // Require approval above this amount
+  flagNewVendors: integer("flag_new_vendors", { mode: "boolean" }).default(false), // Flag purchases from new merchants
+  
+  // Merchant restrictions (JSON arrays)
+  blockedMerchants: text("blocked_merchants"), // JSON array of blocked merchant names
+  allowedMerchants: text("allowed_merchants"), // JSON array - if set, only these merchants allowed
+  
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-// Policies
+// Known Merchants - track merchant history for new vendor detection
+export const knownMerchants = sqliteTable("known_merchants", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  merchantName: text("merchant_name").notNull(),
+  merchantNameNormalized: text("merchant_name_normalized").notNull(), // lowercase, trimmed
+  firstSeenAt: integer("first_seen_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  transactionCount: integer("transaction_count").notNull().default(1),
+});
+
+// Policies - DEPRECATED: Kept for backward compatibility
+// New logic uses agent-level controls instead
 export const policies = sqliteTable("policies", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
@@ -93,9 +125,27 @@ export const purchaseIntents = sqliteTable("purchase_intents", {
   merchantName: text("merchant_name").notNull(),
   merchantUrl: text("merchant_url"),
   metadata: text("metadata"), // JSON object
-  status: text("status", { enum: ["pending", "approved", "rejected", "expired"] }).notNull().default("pending"),
+  status: text("status", { enum: ["pending", "pending_approval", "approved", "rejected", "expired"] }).notNull().default("pending"),
   rejectionReason: text("rejection_reason"),
   rejectionCode: text("rejection_code"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Pending Approvals - queue for human review
+export const pendingApprovals = sqliteTable("pending_approvals", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  purchaseIntentId: text("purchase_intent_id").notNull().references(() => purchaseIntents.id),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  agentId: text("agent_id").notNull().references(() => agents.id),
+  amount: real("amount").notNull(),
+  merchantName: text("merchant_name").notNull(),
+  reason: text("reason").notNull(), // "OVER_THRESHOLD", "NEW_VENDOR", "ORG_GUARDRAIL"
+  reasonDetails: text("reason_details"), // Additional context
+  status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
+  reviewedBy: text("reviewed_by").references(() => users.id),
+  reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
+  reviewNotes: text("review_notes"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -133,7 +183,7 @@ export const transactions = sqliteTable("transactions", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-// Budget Tracking
+// Budget Tracking - simplified for org and agent level
 export const budgetTracking = sqliteTable("budget_tracking", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
@@ -175,3 +225,20 @@ export const auditLogs = sqliteTable("audit_logs", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// Type definitions for JSON fields
+export interface OrgGuardrails {
+  blockCategories?: string[];
+  requireApprovalAbove?: number;
+  flagAllNewVendors?: boolean;
+  maxTransactionAmount?: number;
+}
+
+export interface AgentSpendingControls {
+  monthlyLimit?: number;
+  dailyLimit?: number;
+  perTransactionLimit?: number;
+  approvalThreshold?: number;
+  flagNewVendors?: boolean;
+  blockedMerchants?: string[];
+  allowedMerchants?: string[];
+}

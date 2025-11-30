@@ -15,7 +15,7 @@ import {
 const navigation = [
   { name: "Dashboard", href: "/dashboard" },
   { name: "Agents", href: "/dashboard/agents" },
-  { name: "Policies", href: "/dashboard/policies" },
+  { name: "Approvals", href: "/dashboard/approvals" },
   { name: "Transactions", href: "/dashboard/transactions" },
   { name: "Analytics", href: "/dashboard/analytics" },
   { name: "Settings", href: "/dashboard/settings" },

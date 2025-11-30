@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Simplified Governance Model (November 30, 2025)
+
+Major refactor to simplify the governance model based on real-world expense management best practices.
+
+#### Changed
+- **Governance Model**: Replaced complex policy-based system with 2-level hierarchy (Organization → Agents)
+- **Agent Controls**: Spending limits now live directly on agents instead of separate policy entities
+  - `monthlyLimit`, `dailyLimit`, `perTransactionLimit`
+  - `approvalThreshold` - Require human approval above amount
+  - `flagNewVendors` - Require approval for first-time merchants
+  - `blockedMerchants`, `allowedMerchants` - JSON arrays for restrictions
+- **Organization Guardrails**: Org-wide rules stored as JSON in organizations table
+  - `monthlyBudget` - Total organization spending cap
+  - `alertThreshold` - Warning at percentage of budget
+  - `maxTransactionAmount` - Hard cap on any single transaction
+  - `requireApprovalAbove` - Org-wide approval threshold
+  - `flagAllNewVendors` - Require approval for all new merchants
+  - `blockCategories` - Blocked merchant categories
+- **Spending Checker**: New simplified `lib/spending/checker.ts` replaces complex policy evaluator
+- **Purchase Intent API**: Updated to use new spending checker logic
+- **MCP Handlers**: Updated to use new simplified controls
+
+#### Added
+- **Approvals Page** (`/dashboard/approvals`)
+  - Queue for purchases requiring human review
+  - Approve/reject with notes
+  - Filter by status (pending/approved/rejected)
+- **Approvals API** (`/api/internal/approvals`)
+  - List pending approvals
+  - Approve/reject purchase requests
+- **Organization Settings API** (`/api/internal/settings/organization`)
+  - Get/update org budget and guardrails
+- **Budget Utilization API** (`/api/internal/budget`)
+  - Get current budget usage for dashboard
+- **Dashboard Budget Card**
+  - Visual progress bar showing org budget utilization
+  - Warning when over threshold
+  - Link to adjust budget
+- **Pending Approvals Alert**
+  - Alert banner on dashboard when approvals pending
+  - Quick link to approvals page
+- **Known Merchants Table**
+  - Tracks first-time and repeat merchants
+  - Enables new vendor detection
+- **Pending Approvals Table**
+  - Links purchase intents to approval workflow
+  - Tracks reviewer and review notes
+- **Agent Creation with Controls**
+  - Tabbed form: Basic Info, Spending Limits, Controls
+  - Set all limits during agent creation
+  - Edit existing agent controls
+- **Settings Guardrails Tab**
+  - Configure org budget
+  - Set guardrails (max transaction, approval threshold, etc.)
+  - Toggle org-wide new vendor flagging
+- **`pending_approval` Status**
+  - New purchase intent status for items awaiting review
+
+#### Deprecated
+- **Policies Table**: Kept for data but no longer used in evaluation
+- **Policies Page**: Removed from navigation (can be restored as "Advanced")
+- **PolicyEvaluator Class**: Replaced by simpler spending checker
+
+---
+
+### Previous Changes
+
 ### Added
 - Initial project setup with Next.js 14+ (App Router), TypeScript, and Tailwind CSS
 - Comprehensive documentation structure (ARCHITECTURE.md, API.md, POLICY_ENGINE.md, STRIPE_INTEGRATION.md, DATABASE_SCHEMA.md, UI_COMPONENTS.md, DEPLOYMENT.md, CONTRIBUTING.md)
@@ -115,4 +182,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Claude Desktop integration
   - Testing commands
 - Full MCP type definitions and handlers
-

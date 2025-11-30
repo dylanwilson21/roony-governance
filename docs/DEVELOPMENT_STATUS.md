@@ -1,14 +1,38 @@
 # Development Status
 
-**Last Updated**: November 28, 2025
+**Last Updated**: November 30, 2025
 
 ## Project Overview
 
 Roony is a financial firewall for AI agents. It sits between AI agents and payment systems, evaluating purchase requests in real-time and issuing just-in-time virtual cards via Stripe Issuing.
 
-## Current Status: MVP Complete ✅
+## Current Status: MVP Complete + Simplified Governance ✅
 
-The MVP is fully functional and ready for testing/deployment.
+The MVP is fully functional with a recently simplified governance model.
+
+## Governance Model
+
+Roony uses a **2-level hierarchy**: Organization → Agents
+
+### Organization Level
+- **Monthly budget** - Total spending cap for all agents combined
+- **Guardrails** - Rules that apply to ALL agents:
+  - Maximum transaction amount (hard cap)
+  - Require approval above threshold
+  - Flag all new vendor purchases
+  - Blocked categories/merchants
+
+### Agent Level
+Each agent has direct spending controls:
+- **Monthly limit** - Max spend per month
+- **Daily limit** - Max spend per day
+- **Per-transaction limit** - Max single purchase
+- **Approval threshold** - Require human approval above amount
+- **Flag new vendors** - Require approval for first-time merchants
+- **Blocked/Allowed merchants** - Merchant restrictions
+
+### Approval Queue
+Purchases that require human review go to the **Approvals** page where admins can approve or reject them.
 
 ## What's Built
 
@@ -28,11 +52,13 @@ The MVP is fully functional and ready for testing/deployment.
 - `GET /api/mcp` - MCP server info and capabilities
 
 **Internal APIs** (for dashboard):
-- `GET/POST /api/internal/agents` - List/create agents
+- `GET/POST /api/internal/agents` - List/create agents with spending controls
 - `GET/PUT/DELETE /api/internal/agents/[id]` - Agent CRUD
 - `POST /api/internal/agents/[id]/regenerate-key` - Regenerate API key
-- `GET/POST /api/internal/policies` - List/create policies
-- `GET/PUT/DELETE /api/internal/policies/[id]` - Policy CRUD
+- `GET/POST /api/internal/approvals` - List pending approvals
+- `PUT /api/internal/approvals/[id]` - Approve/reject purchase
+- `GET/PUT /api/internal/settings/organization` - Org settings & guardrails
+- `GET /api/internal/budget` - Budget utilization
 - `GET /api/internal/transactions` - Transaction history
 - `GET /api/internal/analytics` - Dashboard analytics
 
@@ -49,18 +75,16 @@ The MVP is fully functional and ready for testing/deployment.
 #### Core Libraries
 
 - `lib/auth/config.ts` - NextAuth configuration
-- `lib/database/schema.ts` - Drizzle ORM schema (all tables)
+- `lib/database/schema.ts` - Drizzle ORM schema
 - `lib/database/index.ts` - Database connection
-- `lib/policy-engine/evaluator.ts` - Policy evaluation logic
-- `lib/policy-engine/types.ts` - TypeScript types for policies
-- `lib/budget/tracker.ts` - Budget tracking and enforcement
+- `lib/spending/checker.ts` - **NEW** Simplified spending checks
+- `lib/budget/tracker.ts` - Budget tracking
 - `lib/stripe/client.ts` - Stripe client
 - `lib/stripe/connect.ts` - Stripe Connect OAuth
 - `lib/stripe/issuing.ts` - Virtual card creation
-- `lib/mcp/server.ts` - MCP protocol server implementation
+- `lib/mcp/server.ts` - MCP protocol server
 - `lib/mcp/tools.ts` - MCP tool definitions
-- `lib/mcp/handlers.ts` - MCP tool execution handlers
-- `lib/mcp/types.ts` - MCP TypeScript types
+- `lib/mcp/handlers.ts` - MCP tool execution
 
 ### Frontend (100% Complete)
 
@@ -68,34 +92,36 @@ The MVP is fully functional and ready for testing/deployment.
 - `/` - Landing page
 - `/login` - Login page
 - `/register` - Registration page
-- `/dashboard` - Dashboard home with analytics
-- `/dashboard/agents` - Agent management
-- `/dashboard/policies` - Policy management
+- `/dashboard` - Dashboard with budget utilization + pending alerts
+- `/dashboard/agents` - Agent management with spending controls
+- `/dashboard/approvals` - **NEW** Human approval queue
 - `/dashboard/transactions` - Transaction history
 - `/dashboard/analytics` - Analytics dashboard
-- `/dashboard/settings` - Stripe connection & API docs
+- `/dashboard/settings` - Guardrails, Stripe connection, API docs
 
 #### Components
 - `components/layout/DashboardLayout.tsx` - Sidebar layout
 - `components/providers/SessionProvider.tsx` - Auth provider
-- `components/ui/*` - shadcn/ui components (button, card, table, dialog, etc.)
+- `components/ui/*` - shadcn/ui components
 
 ### Database Schema
 
-Tables implemented in `lib/database/schema.ts`:
-- `organizations` - Top-level orgs
+Tables in `lib/database/schema.ts`:
+- `organizations` - Orgs with `monthlyBudget`, `alertThreshold`, `guardrails`
 - `users` - User accounts
-- `teams` - Agent groupings
+- `teams` - Agent groupings (for reporting)
 - `projects` - Project groupings
 - `stripe_connections` - Stripe OAuth tokens
-- `agents` - AI agents with API keys
-- `policies` - Spending rules
+- `agents` - AI agents with spending controls built-in
+- `known_merchants` - **NEW** Tracks merchants for new vendor detection
+- `pending_approvals` - **NEW** Human review queue
 - `purchase_intents` - Purchase requests
 - `virtual_cards` - Created cards
 - `transactions` - Settled transactions
 - `budget_tracking` - Spend tracking
 - `blocked_attempts` - Rejection logs
 - `audit_logs` - Audit trail
+- `policies` - **DEPRECATED** Old policy system (kept for data)
 
 ## File Structure
 
@@ -103,38 +129,34 @@ Tables implemented in `lib/database/schema.ts`:
 roony-governance/
 ├── app/
 │   ├── (auth)/              # Auth pages (login, register)
-│   ├── (dashboard)/         # Dashboard pages
+│   ├── (dashboard)/
+│   │   └── dashboard/
+│   │       ├── page.tsx        # Dashboard with budget card
+│   │       ├── agents/         # Agent management
+│   │       ├── approvals/      # NEW: Approval queue
+│   │       ├── transactions/
+│   │       ├── analytics/
+│   │       └── settings/       # Guardrails + Stripe
 │   ├── api/
-│   │   ├── auth/            # NextAuth endpoints
-│   │   ├── internal/        # Dashboard APIs
-│   │   ├── mcp/             # MCP Protocol endpoint
-│   │   ├── stripe/          # Stripe Connect
-│   │   ├── v1/              # REST Agent API
-│   │   └── webhooks/        # Stripe webhooks
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx
+│   │   ├── auth/
+│   │   ├── internal/
+│   │   │   ├── agents/
+│   │   │   ├── approvals/     # NEW
+│   │   │   ├── budget/        # NEW
+│   │   │   ├── settings/      # NEW
+│   │   │   └── ...
+│   │   ├── mcp/
+│   │   ├── stripe/
+│   │   ├── v1/
+│   │   └── webhooks/
+│   └── ...
 ├── components/
-│   ├── layout/
-│   ├── providers/
-│   └── ui/                  # shadcn components
-├── docs/                    # Documentation
-├── drizzle/                 # Database migrations
+├── docs/
 ├── lib/
-│   ├── auth/
-│   ├── budget/
-│   ├── database/
-│   ├── mcp/                 # MCP Protocol implementation
-│   ├── policy-engine/
-│   ├── stripe/
-│   └── utils.ts
-├── types/
-│   └── next-auth.d.ts
-├── middleware.ts            # Route protection
-├── drizzle.config.ts
-├── tailwind.config.js
-├── postcss.config.js
-└── package.json
+│   ├── spending/            # NEW: Simplified checker
+│   ├── mcp/
+│   └── ...
+└── ...
 ```
 
 ## Environment Variables Required
@@ -145,9 +167,9 @@ DATABASE_URL=file:./roony.db
 
 # Stripe (get from dashboard.stripe.com)
 STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_CONNECT_CLIENT_ID=ca_...
-NEXT_PUBLIC_STRIPE_CONNECT_CLIENT_ID=ca_...
 
 # NextAuth
 NEXTAUTH_URL=http://localhost:3000
@@ -169,30 +191,55 @@ npm run db:push
 # Start dev server
 npm run dev
 
+# Start Stripe webhook forwarding (in another terminal)
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
+
 # Open http://localhost:3000
 ```
 
-## How to Test the Flow
+## How to Test
 
+### 1. Setup
 1. Register at `/register`
-2. Go to `/dashboard/agents` and create an agent (save the API key!)
-3. Go to `/dashboard/policies` and create a policy
-4. Test via REST API:
+2. Go to `/dashboard/settings` → "Spending Guardrails"
+3. Set organization monthly budget (e.g., $10,000)
+4. Set any guardrails (e.g., max transaction $1000, approval above $500)
+
+### 2. Create Agent
+1. Go to `/dashboard/agents`
+2. Click "Create Agent"
+3. Set spending limits (e.g., $500/month, $100/day, $50/transaction)
+4. Set approval threshold (e.g., $25)
+5. Enable "Flag new vendor purchases"
+6. Save and copy the API key!
+
+### 3. Test Purchase
 
 ```bash
+# Should be approved (under all limits)
 curl -X POST http://localhost:3000/api/v1/purchase_intent \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "agent_id": "YOUR_AGENT_ID",
-    "amount": 50.00,
+    "amount": 20.00,
     "currency": "usd",
     "description": "Test purchase",
     "merchant": {"name": "Test Merchant"}
   }'
+
+# Response will be:
+# - "approved" with card details, OR
+# - "pending_approval" if triggers review, OR
+# - "rejected" with reason
 ```
 
-5. Or test via MCP Protocol:
+### 4. Review Approvals
+If a purchase triggers approval:
+1. Go to `/dashboard/approvals`
+2. Review pending purchases
+3. Approve or reject with notes
+
+### MCP Protocol Testing
 
 ```bash
 # List available tools
@@ -201,52 +248,42 @@ curl -X POST http://localhost:3000/api/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
-# Request a purchase via MCP
+# Check budget
 curl -X POST http://localhost:3000/api/mcp \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "jsonrpc":"2.0",
-    "id":2,
+    "jsonrpc":"2.0","id":2,
     "method":"tools/call",
-    "params":{
-      "name":"request_purchase",
-      "arguments":{
-        "amount":50.00,
-        "currency":"usd",
-        "description":"Test purchase",
-        "merchant_name":"Test Merchant"
-      }
-    }
+    "params":{"name":"check_budget","arguments":{}}
   }'
 ```
 
 ## What Could Be Added (Post-MVP)
 
 1. **Charts** - Install recharts for analytics visualizations
-2. **Email notifications** - Alert on blocked transactions
-3. **Team/Project management** - UI for team-based policies
+2. **Email notifications** - Alert on purchases needing approval
+3. **Slack integration** - Approval notifications in Slack
 4. **MCC filtering** - Merchant category code support
-5. **Approval workflow** - Human approval for flagged transactions
-6. **Dark mode** - Theme toggle
-7. **Export functionality** - CSV export of transactions
-8. **Rate limiting** - API rate limits
+5. **Dark mode** - Theme toggle
+6. **Export functionality** - CSV export of transactions
+7. **Rate limiting** - API rate limits
+8. **Multi-org support** - Users in multiple organizations
 
 ## Known Limitations
 
 1. Stripe Issuing requires a business account and approval
-2. Virtual card creation is currently mocked without real Stripe connection
+2. Virtual card creation requires Stripe Issuing to be enabled
 3. No email verification on registration
 4. No password reset flow
-5. Single organization per user (no multi-org support)
+5. Single organization per user
 
 ## Tech Stack
 
-- **Framework**: Next.js 14.2.15 (App Router)
-- **Language**: TypeScript 5.6.3
+- **Framework**: Next.js 16.x (App Router)
+- **Language**: TypeScript 5.x
 - **Database**: SQLite with Drizzle ORM
-- **Auth**: NextAuth.js 4.24.10
-- **Payments**: Stripe 17.2.0
-- **UI**: React 18, shadcn/ui, Tailwind CSS 3.4.14
+- **Auth**: NextAuth.js 4.x
+- **Payments**: Stripe 17.x
+- **UI**: React 18, shadcn/ui, Tailwind CSS 3.x
 - **Icons**: Lucide React
-

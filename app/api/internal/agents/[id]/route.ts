@@ -35,7 +35,14 @@ export async function GET(
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ agent: agent[0] });
+    // Parse JSON fields
+    const parsedAgent = {
+      ...agent[0],
+      blockedMerchants: agent[0].blockedMerchants ? JSON.parse(agent[0].blockedMerchants) : null,
+      allowedMerchants: agent[0].allowedMerchants ? JSON.parse(agent[0].allowedMerchants) : null,
+    };
+
+    return NextResponse.json({ agent: parsedAgent });
   } catch (error) {
     console.error("Error fetching agent:", error);
     return NextResponse.json(
@@ -47,7 +54,7 @@ export async function GET(
 
 /**
  * PUT /api/internal/agents/:id
- * Update agent
+ * Update agent including spending controls
  */
 export async function PUT(
   request: NextRequest,
@@ -61,15 +68,50 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, status } = body;
+    const { 
+      name, 
+      description,
+      status,
+      teamId,
+      // Spending limits
+      monthlyLimit,
+      dailyLimit,
+      perTransactionLimit,
+      // Controls
+      approvalThreshold,
+      flagNewVendors,
+      blockedMerchants,
+      allowedMerchants,
+    } = body;
+
+    // Build update object with only provided fields
+    const updateData: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (status !== undefined) updateData.status = status;
+    if (teamId !== undefined) updateData.teamId = teamId;
+    
+    // Spending limits
+    if (monthlyLimit !== undefined) updateData.monthlyLimit = monthlyLimit;
+    if (dailyLimit !== undefined) updateData.dailyLimit = dailyLimit;
+    if (perTransactionLimit !== undefined) updateData.perTransactionLimit = perTransactionLimit;
+    
+    // Controls
+    if (approvalThreshold !== undefined) updateData.approvalThreshold = approvalThreshold;
+    if (flagNewVendors !== undefined) updateData.flagNewVendors = flagNewVendors;
+    if (blockedMerchants !== undefined) {
+      updateData.blockedMerchants = blockedMerchants ? JSON.stringify(blockedMerchants) : null;
+    }
+    if (allowedMerchants !== undefined) {
+      updateData.allowedMerchants = allowedMerchants ? JSON.stringify(allowedMerchants) : null;
+    }
 
     const agent = await db
       .update(agents)
-      .set({
-        ...(name && { name }),
-        ...(status && { status }),
-        updatedAt: new Date(),
-      })
+      .set(updateData)
       .where(
         and(
           eq(agents.id, id),
@@ -82,7 +124,14 @@ export async function PUT(
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ agent: agent[0] });
+    // Parse JSON fields for response
+    const parsedAgent = {
+      ...agent[0],
+      blockedMerchants: agent[0].blockedMerchants ? JSON.parse(agent[0].blockedMerchants) : null,
+      allowedMerchants: agent[0].allowedMerchants ? JSON.parse(agent[0].allowedMerchants) : null,
+    };
+
+    return NextResponse.json({ agent: parsedAgent });
   } catch (error) {
     console.error("Error updating agent:", error);
     return NextResponse.json(

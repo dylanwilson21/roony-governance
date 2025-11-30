@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/database";
-import { agents, purchaseIntents, virtualCards, stripeConnections } from "@/lib/database/schema";
+import { agents, purchaseIntents, virtualCards, stripeConnections, pendingApprovals } from "@/lib/database/schema";
 import { eq } from "drizzle-orm";
-import { PolicyEvaluator } from "@/lib/policy-engine/evaluator";
+import { checkSpending, createPendingApproval, recordMerchant } from "@/lib/spending/checker";
 import { createVirtualCard, getCardDetails } from "@/lib/stripe/issuing";
 import crypto from "crypto";
 
@@ -22,7 +22,7 @@ interface PurchaseIntentRequest {
  * Authenticate agent via API key
  */
 async function authenticateAgent(apiKey: string) {
-  // Hash the API key (in production, use proper hashing)
+  // Hash the API key
   const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
   const agent = await db
@@ -46,6 +46,7 @@ async function authenticateAgent(apiKey: string) {
  * POST /api/v1/purchase_intent
  * 
  * Agent endpoint for requesting purchase approval
+ * Uses simplified agent-level spending controls
  */
 export async function POST(request: NextRequest) {
   try {
@@ -80,7 +81,6 @@ export async function POST(request: NextRequest) {
     }
 
     // If agent_id is provided, validate it matches the authenticated agent
-    // Otherwise, just use the authenticated agent's ID
     if (body.agent_id && body.agent_id !== agent.id) {
       return NextResponse.json(
         { error: "agent_id does not match authenticated agent" },
@@ -106,54 +106,62 @@ export async function POST(request: NextRequest) {
 
     const intent = purchaseIntent[0];
 
-    // Evaluate policy
-    const evaluator = new PolicyEvaluator();
-    const evaluation = await evaluator.evaluate(
-      {
-        agentId: agent.id,
-        amount: body.amount,
-        currency: body.currency,
-        description: body.description,
-        merchant: body.merchant,
-        metadata: body.metadata,
-      },
-      agent.id,
-      agent.organizationId,
-      agent.teamId || undefined,
-      agent.projectId || undefined
-    );
+    // Check spending using simplified agent-level controls
+    const checkResult = await checkSpending({
+      agentId: agent.id,
+      amount: body.amount,
+      currency: body.currency,
+      merchantName: body.merchant.name,
+      description: body.description,
+    });
 
     // Handle rejection
-    if (evaluation.status === "rejected") {
+    if (!checkResult.allowed && !checkResult.requiresApproval) {
       await db
         .update(purchaseIntents)
         .set({
           status: "rejected",
-          rejectionReason: evaluation.reasonMessage,
-          rejectionCode: evaluation.reasonCode,
+          rejectionReason: checkResult.rejectionMessage,
+          rejectionCode: checkResult.rejectionCode,
         })
         .where(eq(purchaseIntents.id, intent.id));
 
       return NextResponse.json({
         status: "rejected",
-        reason_code: evaluation.reasonCode,
-        message: evaluation.reasonMessage,
+        reason_code: checkResult.rejectionCode,
+        message: checkResult.rejectionMessage,
       });
     }
 
     // Handle pending approval
-    if (evaluation.status === "pending_approval") {
+    if (checkResult.requiresApproval) {
       await db
         .update(purchaseIntents)
         .set({
-          status: "pending",
+          status: "pending_approval",
         })
         .where(eq(purchaseIntents.id, intent.id));
 
+      // Create pending approval record
+      const approvalReason = checkResult.approvalReason?.includes("threshold") 
+        ? "OVER_THRESHOLD" 
+        : checkResult.approvalReason?.includes("vendor") 
+          ? "NEW_VENDOR" 
+          : "ORG_GUARDRAIL";
+
+      await createPendingApproval(
+        intent.id,
+        agent.organizationId,
+        agent.id,
+        body.amount,
+        body.merchant.name,
+        approvalReason
+      );
+
       return NextResponse.json({
         status: "pending_approval",
-        reason_code: evaluation.reasonCode,
-        message: evaluation.reasonMessage,
+        message: checkResult.approvalReason || "This purchase requires human approval",
+        purchase_intent_id: intent.id,
       });
     }
 
@@ -247,6 +255,9 @@ export async function POST(request: NextRequest) {
         })
         .where(eq(purchaseIntents.id, intent.id));
 
+      // Record merchant as known for future new vendor checks
+      await recordMerchant(agent.organizationId, body.merchant.name);
+
       // Return card details to agent
       return NextResponse.json({
         status: "approved",
@@ -294,4 +305,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

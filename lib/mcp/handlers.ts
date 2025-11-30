@@ -1,9 +1,8 @@
 import { MCPToolResult } from "./types";
 import { db } from "@/lib/database";
-import { policies, purchaseIntents, virtualCards } from "@/lib/database/schema";
-import { eq, and, desc } from "drizzle-orm";
-import { PolicyEvaluator } from "@/lib/policy-engine/evaluator";
-import { getAgentSpend } from "@/lib/budget/tracker";
+import { purchaseIntents, virtualCards, agents, organizations } from "@/lib/database/schema";
+import { eq, and, desc, gte, sql } from "drizzle-orm";
+import { checkSpending, createPendingApproval, recordMerchant, getBudgetUtilization } from "@/lib/spending/checker";
 
 // Helper to create text result
 function textResult(text: string, isError = false): MCPToolResult {
@@ -23,7 +22,7 @@ function jsonResult(data: unknown, isError = false): MCPToolResult {
 
 /**
  * Execute request_purchase tool
- * Evaluates the purchase against policies and returns a virtual card if approved
+ * Evaluates the purchase against agent controls and org guardrails
  */
 export async function executeRequestPurchase(
   agentId: string,
@@ -46,28 +45,19 @@ export async function executeRequestPurchase(
     return textResult("Error: 'merchant_name' is required", true);
   }
 
-  // Create purchase request
-  const purchaseRequest = {
+  // Check spending using simplified agent-level controls
+  const checkResult = await checkSpending({
     agentId,
     amount: amount as number,
     currency: currency as string,
+    merchantName: merchant_name as string,
     description: description as string,
-    merchant: {
-      name: merchant_name as string,
-      url: merchant_url as string | undefined,
-    },
-    metadata: project_id ? { project_id: project_id as string } : undefined,
-  };
+  });
 
-  // Evaluate against policies using the PolicyEvaluator class
-  const evaluator = new PolicyEvaluator();
-  const evaluation = await evaluator.evaluate(purchaseRequest, agentId, organizationId);
-
-  if (evaluation.status !== "approved") {
+  // Handle rejection
+  if (!checkResult.allowed && !checkResult.requiresApproval) {
     // Log the blocked attempt
-    const intentId = crypto.randomUUID();
     await db.insert(purchaseIntents).values({
-      id: intentId,
       organizationId,
       agentId,
       amount: amount as number,
@@ -75,23 +65,60 @@ export async function executeRequestPurchase(
       description: description as string,
       merchantName: merchant_name as string,
       merchantUrl: (merchant_url as string) || null,
+      metadata: project_id ? JSON.stringify({ project_id }) : null,
       status: "rejected",
-      rejectionCode: evaluation.reasonCode || "POLICY_REJECTED",
-      rejectionReason: evaluation.reasonMessage,
+      rejectionCode: checkResult.rejectionCode || "POLICY_REJECTED",
+      rejectionReason: checkResult.rejectionMessage,
     });
 
     return jsonResult({
       status: "rejected",
-      reason_code: evaluation.reasonCode,
-      message: evaluation.reasonMessage,
-      suggestion: getSuggestion(evaluation.reasonCode),
+      reason_code: checkResult.rejectionCode,
+      message: checkResult.rejectionMessage,
+      suggestion: getSuggestion(checkResult.rejectionCode),
+    });
+  }
+
+  // Handle pending approval
+  if (checkResult.requiresApproval) {
+    const intent = await db.insert(purchaseIntents).values({
+      organizationId,
+      agentId,
+      amount: amount as number,
+      currency: currency as string,
+      description: description as string,
+      merchantName: merchant_name as string,
+      merchantUrl: (merchant_url as string) || null,
+      metadata: project_id ? JSON.stringify({ project_id }) : null,
+      status: "pending_approval",
+    }).returning();
+
+    // Create pending approval record
+    const approvalReason = checkResult.approvalReason?.includes("threshold") 
+      ? "OVER_THRESHOLD" 
+      : checkResult.approvalReason?.includes("vendor") 
+        ? "NEW_VENDOR" 
+        : "ORG_GUARDRAIL";
+
+    await createPendingApproval(
+      intent[0].id,
+      organizationId,
+      agentId,
+      amount as number,
+      merchant_name as string,
+      approvalReason
+    );
+
+    return jsonResult({
+      status: "pending_approval",
+      message: checkResult.approvalReason || "This purchase requires human approval",
+      purchase_intent_id: intent[0].id,
+      suggestion: "A human administrator will review this request. You'll be notified of the decision.",
     });
   }
 
   // Create purchase intent record
-  const intentId = crypto.randomUUID();
-  await db.insert(purchaseIntents).values({
-    id: intentId,
+  const intent = await db.insert(purchaseIntents).values({
     organizationId,
     agentId,
     amount: amount as number,
@@ -99,8 +126,9 @@ export async function executeRequestPurchase(
     description: description as string,
     merchantName: merchant_name as string,
     merchantUrl: (merchant_url as string) || null,
+    metadata: project_id ? JSON.stringify({ project_id }) : null,
     status: "approved",
-  });
+  }).returning();
 
   // In production, this would call Stripe Issuing to create a real card
   // For now, return mock card details
@@ -117,8 +145,7 @@ export async function executeRequestPurchase(
 
   // Record the virtual card
   await db.insert(virtualCards).values({
-    id: crypto.randomUUID(),
-    purchaseIntentId: intentId,
+    purchaseIntentId: intent[0].id,
     stripeCardId: mockCard.card_id,
     last4: "4242",
     expMonth: mockCard.exp_month,
@@ -129,20 +156,23 @@ export async function executeRequestPurchase(
     expiresAt,
   });
 
+  // Record merchant as known for future new vendor checks
+  await recordMerchant(organizationId, merchant_name as string);
+
   return jsonResult({
     status: "approved",
     card: mockCard,
     hard_limit_amount: amount,
     currency: currency,
     expires_at: expiresAt.toISOString(),
-    purchase_intent_id: intentId,
+    purchase_intent_id: intent[0].id,
     message: `Purchase approved. Use this card to complete your purchase of ${description}.`,
   });
 }
 
 /**
  * Execute check_budget tool
- * Returns budget information for the agent
+ * Returns budget information for the agent using simplified controls
  */
 export async function executeCheckBudget(
   agentId: string,
@@ -151,76 +181,93 @@ export async function executeCheckBudget(
 ): Promise<MCPToolResult> {
   const period = (args.period as string) || "all";
 
-  // Get agent's policies
-  const agentPolicies = await db
+  // Get agent's limits
+  const agent = await db
     .select()
-    .from(policies)
-    .where(and(
-      eq(policies.organizationId, organizationId),
-      eq(policies.enabled, true)
-    ));
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .limit(1);
 
-  // Calculate limits from policies
-  const limits = {
-    perTransaction: Infinity,
-    daily: Infinity,
-    weekly: Infinity,
-    monthly: Infinity,
-  };
-
-  for (const policy of agentPolicies) {
-    const rules = JSON.parse(policy.rules as string) as { budget?: { perTransactionLimit?: number; dailyLimit?: number; weeklyLimit?: number; monthlyLimit?: number } };
-    if (rules.budget) {
-      if (rules.budget.perTransactionLimit) {
-        limits.perTransaction = Math.min(limits.perTransaction, rules.budget.perTransactionLimit);
-      }
-      if (rules.budget.dailyLimit) {
-        limits.daily = Math.min(limits.daily, rules.budget.dailyLimit);
-      }
-      if (rules.budget.weeklyLimit) {
-        limits.weekly = Math.min(limits.weekly, rules.budget.weeklyLimit);
-      }
-      if (rules.budget.monthlyLimit) {
-        limits.monthly = Math.min(limits.monthly, rules.budget.monthlyLimit);
-      }
-    }
+  if (agent.length === 0) {
+    return textResult("Error: Agent not found", true);
   }
 
-  // Get current spend
-  const spend = await getAgentSpend(agentId, organizationId);
+  const agentData = agent[0];
+
+  // Get current spend by querying purchase intents
+  const now = new Date();
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const dailySpendResult = await db
+    .select({ total: sql<number>`COALESCE(SUM(${purchaseIntents.amount}), 0)` })
+    .from(purchaseIntents)
+    .where(and(
+      eq(purchaseIntents.agentId, agentId),
+      eq(purchaseIntents.status, "approved"),
+      gte(purchaseIntents.createdAt, dayStart)
+    ));
+
+  const monthlySpendResult = await db
+    .select({ total: sql<number>`COALESCE(SUM(${purchaseIntents.amount}), 0)` })
+    .from(purchaseIntents)
+    .where(and(
+      eq(purchaseIntents.agentId, agentId),
+      eq(purchaseIntents.status, "approved"),
+      gte(purchaseIntents.createdAt, monthStart)
+    ));
+
+  const dailySpent = dailySpendResult[0]?.total || 0;
+  const monthlySpent = monthlySpendResult[0]?.total || 0;
+
+  // Get org budget info
+  const orgBudget = await getBudgetUtilization(organizationId);
+
+  const limits = {
+    per_transaction: agentData.perTransactionLimit || "unlimited",
+    daily: agentData.dailyLimit || "unlimited",
+    monthly: agentData.monthlyLimit || "unlimited",
+  };
+
   const currentSpend = {
-    daily: spend.dailySpent,
-    weekly: spend.weeklySpent,
-    monthly: spend.monthlySpent,
-    lifetime: spend.lifetimeSpent,
+    daily: dailySpent,
+    monthly: monthlySpent,
+  };
+
+  const remaining = {
+    daily: agentData.dailyLimit ? Math.max(0, agentData.dailyLimit - dailySpent) : "unlimited",
+    monthly: agentData.monthlyLimit ? Math.max(0, agentData.monthlyLimit - monthlySpent) : "unlimited",
   };
 
   const budgetInfo = {
     agent_id: agentId,
+    agent_name: agentData.name,
     currency: "usd",
-    limits: {
-      per_transaction: limits.perTransaction === Infinity ? "unlimited" : limits.perTransaction,
-      daily: limits.daily === Infinity ? "unlimited" : limits.daily,
-      weekly: limits.weekly === Infinity ? "unlimited" : limits.weekly,
-      monthly: limits.monthly === Infinity ? "unlimited" : limits.monthly,
-    },
+    limits,
     current_spend: currentSpend,
-    remaining: {
-      daily: limits.daily === Infinity ? "unlimited" : Math.max(0, limits.daily - currentSpend.daily),
-      weekly: limits.weekly === Infinity ? "unlimited" : Math.max(0, limits.weekly - currentSpend.weekly),
-      monthly: limits.monthly === Infinity ? "unlimited" : Math.max(0, limits.monthly - currentSpend.monthly),
+    remaining,
+    organization: {
+      monthly_budget: orgBudget.orgBudget || "unlimited",
+      org_spent: orgBudget.orgSpent,
+      org_remaining: orgBudget.orgRemaining || "unlimited",
+      percent_used: orgBudget.percentUsed?.toFixed(1) + "%" || "N/A",
+    },
+    controls: {
+      approval_threshold: agentData.approvalThreshold || "none",
+      flag_new_vendors: agentData.flagNewVendors || false,
+      has_merchant_restrictions: !!(agentData.blockedMerchants || agentData.allowedMerchants),
     },
   };
 
-  if (period !== "all") {
-    // Return only the requested period
-    const periodKey = period as keyof typeof budgetInfo.limits;
+  if (period !== "all" && period in currentSpend) {
+    const periodKey = period as keyof typeof currentSpend;
     return jsonResult({
       agent_id: agentId,
       period,
-      limit: budgetInfo.limits[periodKey],
-      spent: budgetInfo.current_spend[period as keyof typeof budgetInfo.current_spend],
-      remaining: budgetInfo.remaining[period as keyof typeof budgetInfo.remaining],
+      limit: limits[periodKey as keyof typeof limits],
+      spent: currentSpend[periodKey],
+      remaining: remaining[periodKey],
     });
   }
 
@@ -285,79 +332,120 @@ export async function executeListTransactions(
 
 /**
  * Execute get_policy_info tool
- * Returns policy information for the agent
+ * Returns spending controls information for the agent
  */
 export async function executeGetPolicyInfo(
   agentId: string,
   organizationId: string
 ): Promise<MCPToolResult> {
-  const agentPolicies = await db
+  // Get agent controls
+  const agent = await db
     .select()
-    .from(policies)
-    .where(and(
-      eq(policies.organizationId, organizationId),
-      eq(policies.enabled, true)
-    ))
-    .orderBy(policies.priority);
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .limit(1);
 
-  const policyInfo = agentPolicies.map(p => {
-    const rules = JSON.parse(p.rules as string) as {
-      budget?: { perTransactionLimit?: number; dailyLimit?: number; weeklyLimit?: number; monthlyLimit?: number };
-      merchant?: { allowlist?: string[]; blocklist?: string[] };
-      time?: { allowedHours?: { start: number; end: number }; allowedDays?: number[] };
-    };
+  if (agent.length === 0) {
+    return textResult("Error: Agent not found", true);
+  }
 
-    return {
-      name: p.name,
-      description: p.description,
-      scope: p.scopeType,
-      rules: {
-        budget_limits: rules.budget ? {
-          per_transaction: rules.budget.perTransactionLimit || "unlimited",
-          daily: rules.budget.dailyLimit || "unlimited",
-          weekly: rules.budget.weeklyLimit || "unlimited",
-          monthly: rules.budget.monthlyLimit || "unlimited",
-        } : "none",
-        merchant_restrictions: rules.merchant ? {
-          allowed: rules.merchant.allowlist?.length ? rules.merchant.allowlist : "any",
-          blocked: rules.merchant.blocklist?.length ? rules.merchant.blocklist : "none",
-        } : "none",
-        time_restrictions: rules.time ? {
-          allowed_hours: rules.time.allowedHours || "any",
-          allowed_days: rules.time.allowedDays || "any",
-        } : "none",
-      },
-    };
-  });
+  // Get org guardrails
+  const org = await db
+    .select()
+    .from(organizations)
+    .where(eq(organizations.id, organizationId))
+    .limit(1);
 
-  return jsonResult({
+  const agentData = agent[0];
+  const orgData = org[0];
+  const guardrails = orgData?.guardrails ? JSON.parse(orgData.guardrails) : {};
+
+  const policyInfo = {
     agent_id: agentId,
-    policies: policyInfo,
-    summary: policyInfo.length === 0 
-      ? "No policies configured. All purchases will be evaluated against default limits."
-      : `${policyInfo.length} active ${policyInfo.length === 1 ? 'policy' : 'policies'} apply to your purchases.`,
-  });
+    agent_name: agentData.name,
+    agent_controls: {
+      spending_limits: {
+        per_transaction: agentData.perTransactionLimit || "unlimited",
+        daily: agentData.dailyLimit || "unlimited",
+        monthly: agentData.monthlyLimit || "unlimited",
+      },
+      approval_rules: {
+        threshold: agentData.approvalThreshold 
+          ? `Purchases over $${agentData.approvalThreshold} require human approval`
+          : "No approval threshold",
+        new_vendors: agentData.flagNewVendors 
+          ? "Purchases from new vendors require human approval"
+          : "New vendor purchases allowed",
+      },
+      merchant_restrictions: {
+        blocked: agentData.blockedMerchants 
+          ? JSON.parse(agentData.blockedMerchants) 
+          : "none",
+        allowed_only: agentData.allowedMerchants 
+          ? JSON.parse(agentData.allowedMerchants) 
+          : "any merchant",
+      },
+    },
+    organization_guardrails: {
+      monthly_budget: orgData?.monthlyBudget || "unlimited",
+      max_transaction: guardrails.maxTransactionAmount || "unlimited",
+      require_approval_above: guardrails.requireApprovalAbove || "none",
+      flag_all_new_vendors: guardrails.flagAllNewVendors || false,
+      blocked_categories: guardrails.blockCategories?.length 
+        ? guardrails.blockCategories 
+        : "none",
+    },
+    summary: getSummary(agentData, guardrails),
+  };
+
+  return jsonResult(policyInfo);
+}
+
+// Generate a human-readable summary
+function getSummary(agent: typeof agents.$inferSelect, guardrails: Record<string, unknown>): string {
+  const parts = [];
+  
+  if (agent.monthlyLimit) {
+    parts.push(`You have a monthly budget of $${agent.monthlyLimit}`);
+  }
+  if (agent.perTransactionLimit) {
+    parts.push(`max $${agent.perTransactionLimit} per transaction`);
+  }
+  if (agent.approvalThreshold) {
+    parts.push(`purchases over $${agent.approvalThreshold} need approval`);
+  }
+  if (agent.flagNewVendors) {
+    parts.push(`new vendors require approval`);
+  }
+  
+  if (parts.length === 0) {
+    return "No specific limits set. Organization guardrails still apply.";
+  }
+  
+  return parts.join(", ") + ".";
 }
 
 // Get helpful suggestion based on rejection reason
 function getSuggestion(reasonCode?: string): string {
   switch (reasonCode) {
-    case "AMOUNT_TOO_HIGH":
+    case "OVER_TRANSACTION_LIMIT":
       return "Try a smaller purchase amount or request a limit increase from your administrator.";
     case "DAILY_LIMIT_EXCEEDED":
       return "Your daily spending limit has been reached. Try again tomorrow or request a limit increase.";
-    case "WEEKLY_LIMIT_EXCEEDED":
-      return "Your weekly spending limit has been reached. Try again next week or request a limit increase.";
     case "MONTHLY_LIMIT_EXCEEDED":
       return "Your monthly spending limit has been reached. Try again next month or request a limit increase.";
+    case "ORG_BUDGET_EXCEEDED":
+      return "The organization's monthly budget has been reached. Contact your administrator.";
+    case "OVER_ORG_MAX_TRANSACTION":
+      return "This amount exceeds the organization's maximum transaction limit.";
     case "MERCHANT_NOT_ALLOWED":
       return "This merchant is not on the approved list. Contact your administrator to add it.";
     case "MERCHANT_BLOCKED":
-      return "This merchant has been blocked by policy. Use an alternative merchant.";
-    case "TIME_RESTRICTED":
-      return "Purchases are only allowed during business hours. Try again during allowed times.";
-    case "NO_POLICY":
-      return "No spending policy has been configured. Contact your administrator.";
+      return "This merchant has been blocked. Use an alternative merchant.";
+    case "CATEGORY_BLOCKED":
+      return "This merchant category is blocked by organization policy.";
+    case "AGENT_NOT_FOUND":
+      return "Unable to identify the agent. Check your API key configuration.";
     default:
       return "Contact your administrator for assistance.";
   }
