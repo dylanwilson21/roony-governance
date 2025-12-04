@@ -10,6 +10,9 @@ export const organizations = sqliteTable("organizations", {
   alertThreshold: real("alert_threshold").default(0.8), // Alert at 80% by default
   // Organization-wide guardrails (JSON)
   guardrails: text("guardrails"), // JSON: { blockCategories, requireApprovalAbove, flagAllNewVendors, maxTransactionAmount }
+  // Stripe Customer (for saved payment methods - Phase 0)
+  stripeCustomerId: text("stripe_customer_id"), // Stripe Customer ID for saved cards
+  billingEmail: text("billing_email"), // Email for billing notifications
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -128,6 +131,11 @@ export const purchaseIntents = sqliteTable("purchase_intents", {
   status: text("status", { enum: ["pending", "pending_approval", "approved", "rejected", "expired"] }).notNull().default("pending"),
   rejectionReason: text("rejection_reason"),
   rejectionCode: text("rejection_code"),
+  // Phase 0: Multi-protocol and fee support
+  protocol: text("protocol").default("stripe_card"), // 'stripe_card', 'acp', 'ap2', 'x402', 'l402'
+  protocolTxId: text("protocol_tx_id"), // External protocol transaction ID
+  feeAmount: real("fee_amount"), // Roony's fee for this transaction
+  stripePreAuthId: text("stripe_pre_auth_id"), // PaymentIntent ID for pre-authorization
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -162,6 +170,9 @@ export const virtualCards = sqliteTable("virtual_cards", {
   currency: text("currency").notNull(),
   status: text("status", { enum: ["active", "used", "expired", "canceled"] }).notNull().default("active"),
   expiresAt: integer("expires_at", { mode: "timestamp" }),
+  // Phase 0: Subscription support
+  isRecurring: integer("is_recurring", { mode: "boolean" }).default(false),
+  subscriptionId: text("subscription_id"), // Reference to future subscriptions table
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -225,7 +236,72 @@ export const auditLogs = sqliteTable("audit_logs", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// ============================================
+// Phase 0: New Tables for Saved Cards & Fees
+// ============================================
+
+// Customer Payment Methods - replaces stripe_connections for OAuth
+export const customerPaymentMethods = sqliteTable("customer_payment_methods", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  stripePaymentMethodId: text("stripe_payment_method_id").notNull(),
+  type: text("type").notNull().default("card"), // 'card', 'bank_account'
+  brand: text("brand"), // 'visa', 'mastercard', etc.
+  last4: text("last4").notNull(),
+  expMonth: integer("exp_month"),
+  expYear: integer("exp_year"),
+  isDefault: integer("is_default", { mode: "boolean" }).default(false),
+  status: text("status", { enum: ["active", "expired", "failed"] }).notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Transaction Fees - track Roony's fees per transaction
+export const transactionFees = sqliteTable("transaction_fees", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  purchaseIntentId: text("purchase_intent_id").notNull().references(() => purchaseIntents.id),
+  protocol: text("protocol").notNull(), // 'stripe_card', 'acp', 'ap2', 'x402', 'l402'
+  transactionAmount: real("transaction_amount").notNull(),
+  volumeTier: text("volume_tier").notNull(), // 'starter', 'growth', 'business', 'enterprise'
+  baseRate: real("base_rate").notNull(), // e.g., 0.03 for 3%
+  railMultiplier: real("rail_multiplier").notNull().default(1.0),
+  effectiveRate: real("effective_rate").notNull(),
+  feeAmount: real("fee_amount").notNull(),
+  totalCharged: real("total_charged").notNull(), // transaction_amount + fee_amount
+  stripeChargeId: text("stripe_charge_id"), // ID of the charge to customer's card
+  status: text("status", { enum: ["pending", "charged", "failed", "refunded"] }).notNull().default("pending"),
+  chargedAt: integer("charged_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Monthly Volumes - track org volume for tier calculation
+export const monthlyVolumes = sqliteTable("monthly_volumes", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  month: text("month").notNull(), // '2025-12'
+  totalVolume: real("total_volume").default(0),
+  transactionCount: integer("transaction_count").default(0),
+  feeRevenue: real("fee_revenue").default(0),
+  volumeTier: text("volume_tier"), // Current tier based on volume
+  byProtocol: text("by_protocol"), // JSON: {"stripe_card": 5000, "x402": 2000}
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// Treasury Balances - for crypto rails (Phase 3)
+export const treasuryBalances = sqliteTable("treasury_balances", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  rail: text("rail").notNull().unique(), // 'stripe_issuing', 'usdc_base', 'lightning'
+  balance: real("balance").notNull().default(0),
+  lastRebalanceAt: integer("last_rebalance_at", { mode: "timestamp" }),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ============================================
 // Type definitions for JSON fields
+// ============================================
+
 export interface OrgGuardrails {
   blockCategories?: string[];
   requireApprovalAbove?: number;
@@ -241,4 +317,19 @@ export interface AgentSpendingControls {
   flagNewVendors?: boolean;
   blockedMerchants?: string[];
   allowedMerchants?: string[];
+}
+
+// Fee calculation types
+export interface VolumeTier {
+  name: string;
+  minVolume: number;
+  maxVolume: number;
+  baseRate: number;
+}
+
+export interface FeeCalculation {
+  baseRate: number;
+  railMultiplier: number;
+  effectiveRate: number;
+  amount: number;
 }

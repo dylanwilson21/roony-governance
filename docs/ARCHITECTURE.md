@@ -65,9 +65,15 @@ AI Agent → Roony API → Spending Checker → [Approved?]
    - Approval threshold checks
 
 3. **Stripe Integration** (`lib/stripe/`)
-   - Connect OAuth flow for delegated access
-   - Issuing API for virtual card creation
-   - Webhook processing for transaction settlement
+   - Customer management for saved payment methods (Phase 0+)
+   - Payment method attachment and pre-authorization
+   - Issuing API for virtual card creation (from Roony's master account)
+   - Webhook processing for transaction settlement and capture
+
+4. **Billing** (`lib/billing/`)
+   - Fee calculation based on volume tiers
+   - Monthly volume tracking
+   - Rail multipliers for different payment methods
 
 4. **Database Layer** (`lib/database/`)
    - SQLite with Drizzle ORM
@@ -85,7 +91,7 @@ AI Agent → Roony API → Spending Checker → [Approved?]
 
 ## Data Flow
 
-### Purchase Request Flow
+### Purchase Request Flow (Phase 0+)
 
 ```
 1. Agent sends POST /api/v1/purchase_intent
@@ -93,7 +99,9 @@ AI Agent → Roony API → Spending Checker → [Approved?]
 
 2. Authenticate agent via API key hash
 
-3. Spending checker evaluates:
+3. Calculate fee based on org's volume tier
+
+4. Spending checker evaluates:
    a. Agent per-transaction limit
    b. Org max transaction amount
    c. Agent daily limit
@@ -104,11 +112,20 @@ AI Agent → Roony API → Spending Checker → [Approved?]
    h. Approval threshold check
    i. New vendor check
 
-4. Result:
+5. Result:
    ├─ REJECTED → Return error with reason code
    ├─ REQUIRES APPROVAL → Queue for human review
-   └─ APPROVED → Create virtual card
-                  └─ Return card details to agent
+   └─ APPROVED:
+       a. Get customer's default payment method
+       b. Pre-authorize card (amount + fee + buffer)
+       c. Create virtual card from Roony's Issuing account
+       d. Return card details + fee info to agent
+
+6. Webhook flow (when card is used):
+   a. issuing_authorization.created received
+   b. Capture pre-auth for actual amount + fee
+   c. Update monthly volume
+   d. Create transaction record
 ```
 
 ### Approval Flow

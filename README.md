@@ -6,12 +6,13 @@ Roony is a financial firewall for AI agents. It sits between your agents and you
 
 ## Key Features
 
+- **Simplified Onboarding**: Just add a credit card—no Stripe account required (Phase 0+)
 - **Simplified Governance**: 2-level hierarchy (Organization → Agents) with spending controls directly on agents
 - **Real-time Spending Checks**: Evaluate purchase requests against agent limits and org guardrails
-- **Just-in-Time Virtual Cards**: Issue single-use, constrained virtual cards via Stripe Issuing
+- **Just-in-Time Virtual Cards**: Issue single-use, constrained virtual cards via Roony's Stripe Issuing
 - **Approval Queue**: Human review for purchases over thresholds or from new vendors
 - **MCP Protocol Support**: Native Model Context Protocol integration for AI agent platforms
-- **Secure Payment Infrastructure**: Stripe Connect OAuth flow (no raw API keys)
+- **Transaction-Based Pricing**: Volume-based fee tiers (1-3%) instead of flat subscription
 - **Budget Tracking**: Organization and agent-level budget utilization with alerts
 - **Professional Dashboard**: Blue/white financial professional UI with shadcn/ui
 
@@ -41,10 +42,23 @@ Organization
 
 See **[Development Status](docs/DEVELOPMENT_STATUS.md)** for detailed information on what's built, file structure, and how to test.
 
+## Roadmap: v2.0 Universal AI Agent Payment Platform
+
+We're transforming Roony from a "Stripe Connect governance layer" to a **Universal AI Agent Payment Platform**. Key changes:
+
+- **Simplified Onboarding**: Just add a credit card (no Stripe account required)
+- **Multi-Protocol Support**: MCP + ACP (OpenAI) + AP2 (Google) + A2A
+- **Multi-Rail Payments**: Stripe cards + x402 (USDC) + L402 (Bitcoin Lightning)
+- **Transaction-Based Revenue**: 1-3% fee model based on volume
+- **Enterprise Features**: RBAC, compliance, accounting integrations
+
+📋 **[View Full Implementation Roadmap](docs/IMPLEMENTATION_ROADMAP.md)** - Detailed 15-week plan with step-by-step instructions for each phase.
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs/` directory:
 
+- **[Implementation Roadmap](docs/IMPLEMENTATION_ROADMAP.md)** - v2.0 transformation plan with step-by-step guides
 - **[Development Status](docs/DEVELOPMENT_STATUS.md)** - Current state, what's built, how to test
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture, data flow, component relationships
 - **[API Documentation](docs/API.md)** - REST API specifications for agent endpoints
@@ -142,14 +156,16 @@ npm run db:studio    # Open database studio
 
 ## How It Works
 
-1. **Connect Stripe**: Customer connects their Stripe account via OAuth
+1. **Add Payment Method**: Customer adds a credit/debit card (Phase 0+)
 2. **Set Organization Budget**: Configure monthly budget and guardrails
 3. **Create Agents**: Define agents with spending limits and controls
 4. **Agent Requests Purchase**: Agent calls API with purchase details
 5. **Spending Check**: Roony checks agent limits → org guardrails → approval rules
-6. **Card Creation**: If approved, create just-in-time virtual card
-7. **Approval Queue**: Flagged purchases go to human review
-8. **Dashboard**: Monitor spend, review approvals, manage agents
+6. **Pre-Authorization**: Customer's card is pre-authorized for amount + fee
+7. **Card Creation**: Create just-in-time virtual card from Roony's Issuing account
+8. **Capture on Use**: When card is used, capture exact amount + Roony fee
+9. **Approval Queue**: Flagged purchases go to human review
+10. **Dashboard**: Monitor spend, review approvals, manage agents
 
 ## Integration Options
 

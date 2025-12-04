@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,11 +9,14 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-interface StripeStatus {
-  connected: boolean;
-  status?: string;
-  accountId?: string;
-  connectedAt?: string;
+interface PaymentMethod {
+  id: string;
+  brand: string | null;
+  last4: string;
+  expMonth: number | null;
+  expYear: number | null;
+  isDefault: boolean;
+  status: string;
 }
 
 interface OrgSettings {
@@ -28,12 +31,45 @@ interface OrgSettings {
   };
 }
 
-export default function SettingsPage() {
+interface VolumeInfo {
+  month: string;
+  totalVolume: number;
+  transactionCount: number;
+  feeRevenue: number;
+  tier: {
+    name: string;
+    baseRate: number;
+  };
+}
+
+function SettingsMessages() {
   const searchParams = useSearchParams();
-  const [stripeStatus, setStripeStatus] = useState<StripeStatus | null>(null);
+  const successMessage = searchParams.get("success");
+  const errorMessage = searchParams.get("error");
+
+  return (
+    <>
+      {successMessage && (
+        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg">
+          {successMessage}
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+          {errorMessage}
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function SettingsPage() {
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [volumeInfo, setVolumeInfo] = useState<VolumeInfo | null>(null);
   
   // Organization settings state
   const [orgSettings, setOrgSettings] = useState<OrgSettings>({
@@ -57,24 +93,22 @@ export default function SettingsPage() {
     flagAllNewVendors: false,
     maxTransactionAmount: "",
   });
-  
-  const successMessage = searchParams.get("success");
-  const errorMessage = searchParams.get("error");
 
   useEffect(() => {
-    fetchStripeStatus();
+    fetchPaymentMethods();
     fetchOrgSettings();
+    fetchVolumeInfo();
   }, []);
 
-  async function fetchStripeStatus() {
+  async function fetchPaymentMethods() {
     try {
-      const res = await fetch("/api/stripe/connect/status");
+      const res = await fetch("/api/internal/payment-methods");
       if (res.ok) {
         const data = await res.json();
-        setStripeStatus(data);
+        setPaymentMethods(data.paymentMethods || []);
       }
     } catch (error) {
-      console.error("Error fetching Stripe status:", error);
+      console.error("Error fetching payment methods:", error);
     } finally {
       setLoading(false);
     }
@@ -100,27 +134,76 @@ export default function SettingsPage() {
     }
   }
 
-  const handleConnectStripe = () => {
-    window.location.href = "/api/stripe/connect";
-  };
+  async function fetchVolumeInfo() {
+    try {
+      // This endpoint would need to be created or use existing analytics
+      const res = await fetch("/api/internal/analytics");
+      if (res.ok) {
+        const data = await res.json();
+        setVolumeInfo({
+          month: new Date().toISOString().slice(0, 7),
+          totalVolume: data.monthlySpend || 0,
+          transactionCount: data.todayTransactions || 0,
+          feeRevenue: 0, // Calculate from transactions
+          tier: {
+            name: data.monthlySpend < 5000 ? "Starter" : 
+                  data.monthlySpend < 25000 ? "Growth" :
+                  data.monthlySpend < 100000 ? "Business" : "Enterprise",
+            baseRate: data.monthlySpend < 5000 ? 0.03 : 
+                      data.monthlySpend < 25000 ? 0.025 :
+                      data.monthlySpend < 100000 ? 0.02 : 0.015,
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching volume info:", error);
+    }
+  }
 
-  const handleDisconnectStripe = async () => {
-    if (!confirm("Are you sure you want to disconnect Stripe? This will disable virtual card creation.")) {
+  async function handleDeletePaymentMethod(id: string) {
+    if (!confirm("Are you sure you want to remove this payment method?")) {
       return;
     }
     
-    setDisconnecting(true);
+    setDeletingId(id);
     try {
-      const res = await fetch("/api/stripe/connect/status", { method: "DELETE" });
+      const res = await fetch(`/api/internal/payment-methods/${id}`, {
+        method: "DELETE",
+      });
+      
       if (res.ok) {
-        setStripeStatus({ connected: false });
+        setPaymentMethods(paymentMethods.filter(pm => pm.id !== id));
+      } else {
+        const error = await res.json();
+        alert(error.error || "Failed to remove payment method");
       }
     } catch (error) {
-      console.error("Error disconnecting Stripe:", error);
+      console.error("Error removing payment method:", error);
+      alert("Failed to remove payment method");
     } finally {
-      setDisconnecting(false);
+      setDeletingId(null);
     }
-  };
+  }
+
+  async function handleSetDefault(id: string) {
+    try {
+      const res = await fetch(`/api/internal/payment-methods/${id}/default`, {
+        method: "PUT",
+      });
+      
+      if (res.ok) {
+        // Update local state
+        setPaymentMethods(paymentMethods.map(pm => ({
+          ...pm,
+          isDefault: pm.id === id,
+        })));
+      } else {
+        alert("Failed to set default payment method");
+      }
+    } catch (error) {
+      console.error("Error setting default:", error);
+    }
+  }
 
   async function saveGuardrails() {
     setSaving(true);
@@ -163,26 +246,31 @@ export default function SettingsPage() {
     }
   }
 
+  function getBrandIcon(brand: string | null) {
+    const brandLower = brand?.toLowerCase() || "";
+    if (brandLower === "visa") {
+      return "💳"; // In production, use actual brand SVGs
+    } else if (brandLower === "mastercard") {
+      return "💳";
+    } else if (brandLower === "amex") {
+      return "💳";
+    }
+    return "💳";
+  }
+
   return (
     <div>
       <h1 className="text-3xl font-bold text-slate-900 mb-8">Settings</h1>
 
-      {successMessage && (
-        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg">
-          {successMessage}
-        </div>
-      )}
-
-      {errorMessage && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
-          {errorMessage}
-        </div>
-      )}
+      <Suspense fallback={null}>
+        <SettingsMessages />
+      </Suspense>
 
       <Tabs defaultValue="guardrails" className="space-y-6">
         <TabsList>
           <TabsTrigger value="guardrails">Spending Guardrails</TabsTrigger>
-          <TabsTrigger value="stripe">Stripe Connection</TabsTrigger>
+          <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
+          <TabsTrigger value="billing">Billing & Fees</TabsTrigger>
           <TabsTrigger value="api">API Configuration</TabsTrigger>
         </TabsList>
 
@@ -305,74 +393,214 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="stripe">
+        <TabsContent value="payment-methods">
           <Card>
             <CardHeader>
-              <CardTitle>Stripe Connection</CardTitle>
+              <CardTitle>Payment Methods</CardTitle>
               <CardDescription>
-                Connect your Stripe account to enable virtual card creation via Stripe Issuing.
+                Manage the credit/debit cards used to fund agent purchases. Your card is charged after each purchase plus Roony&apos;s transaction fee.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-[#635bff] rounded-lg flex items-center justify-center">
-                    <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/>
-                    </svg>
+              {/* Payment Methods List */}
+              <div className="space-y-4">
+                {loading ? (
+                  <div className="text-center py-8 text-slate-500">Loading payment methods...</div>
+                ) : paymentMethods.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="text-4xl mb-4">💳</div>
+                    <p className="text-slate-600 mb-4">No payment methods added yet</p>
+                    <p className="text-sm text-slate-500">Add a credit or debit card to enable agent purchases</p>
                   </div>
+                ) : (
+                  paymentMethods.map((pm) => (
+                    <div 
+                      key={pm.id} 
+                      className="flex items-center justify-between p-4 border rounded-lg hover:border-slate-300 transition-colors"
+                    >
+                      <div className="flex items-center space-x-4">
+                        <div className="text-3xl">{getBrandIcon(pm.brand)}</div>
+                        <div>
+                          <p className="font-medium capitalize">
+                            {pm.brand || "Card"} •••• {pm.last4}
+                          </p>
+                          <p className="text-sm text-slate-500">
+                            Expires {pm.expMonth}/{pm.expYear}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        {pm.isDefault ? (
+                          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Default</Badge>
+                        ) : (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleSetDefault(pm.id)}
+                          >
+                            Set Default
+                          </Button>
+                        )}
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleDeletePaymentMethod(pm.id)}
+                          disabled={deletingId === pm.id}
+                          className="text-red-600 hover:text-red-700 hover:border-red-300"
+                        >
+                          {deletingId === pm.id ? "Removing..." : "Remove"}
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Add Card Section */}
+              <div className="border-t pt-6">
+                <h4 className="font-medium mb-4">Add a Payment Method</h4>
+                <div className="bg-slate-50 border border-dashed rounded-lg p-8 text-center">
+                  <p className="text-slate-600 mb-4">
+                    To add a card, use Stripe&apos;s secure card element (coming soon) or contact support.
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    In development mode, test cards can be added via the API.
+                  </p>
+                </div>
+              </div>
+
+              {/* Info Card */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-medium text-blue-900 mb-2">How Payment Works</h4>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• Your card is pre-authorized when an agent requests a purchase</li>
+                  <li>• The exact amount + Roony fee is captured when the purchase completes</li>
+                  <li>• Unused pre-authorizations are automatically released</li>
+                  <li>• Refunds are automatically returned to your card</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="billing">
+          <div className="space-y-6">
+            {/* Current Tier */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Current Billing Tier</CardTitle>
+                <CardDescription>
+                  Your fee rate is based on your monthly transaction volume.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-100">
                   <div>
-                    <p className="font-medium">Stripe Account</p>
-                    <p className="text-sm text-slate-500">
-                      {loading ? "Checking status..." : stripeStatus?.connected ? `Connected: ${stripeStatus.accountId}` : "Not connected"}
+                    <p className="text-2xl font-bold text-blue-900">
+                      {volumeInfo?.tier.name || "Starter"} Tier
+                    </p>
+                    <p className="text-blue-700">
+                      {((volumeInfo?.tier.baseRate || 0.03) * 100).toFixed(1)}% per transaction
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-slate-600">This month&apos;s volume</p>
+                    <p className="text-xl font-semibold text-slate-900">
+                      ${(volumeInfo?.totalVolume || 0).toLocaleString()}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center space-x-3">
-                  {loading ? (
-                    <Badge variant="secondary">Loading...</Badge>
-                  ) : stripeStatus?.connected ? (
-                    <>
-                      <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Connected</Badge>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={handleDisconnectStripe}
-                        disabled={disconnecting}
+              </CardContent>
+            </Card>
+
+            {/* Fee Tiers */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Volume-Based Pricing</CardTitle>
+                <CardDescription>
+                  Lower your fees by increasing volume. Rates reset monthly.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {[
+                    { name: "Starter", min: 0, max: 5000, rate: 3.0 },
+                    { name: "Growth", min: 5001, max: 25000, rate: 2.5 },
+                    { name: "Business", min: 25001, max: 100000, rate: 2.0 },
+                    { name: "Enterprise", min: 100001, max: null, rate: 1.5 },
+                  ].map((tier) => {
+                    const isCurrentTier = volumeInfo?.tier.name === tier.name;
+                    return (
+                      <div 
+                        key={tier.name}
+                        className={`flex items-center justify-between p-4 rounded-lg border ${
+                          isCurrentTier 
+                            ? "bg-blue-50 border-blue-200" 
+                            : "bg-white border-slate-200"
+                        }`}
                       >
-                        {disconnecting ? "Disconnecting..." : "Disconnect"}
-                      </Button>
-                    </>
-                  ) : (
-                    <Button onClick={handleConnectStripe}>Connect Stripe</Button>
-                  )}
+                        <div className="flex items-center space-x-4">
+                          {isCurrentTier && (
+                            <Badge className="bg-blue-600 text-white">Current</Badge>
+                          )}
+                          <div>
+                            <p className="font-medium">{tier.name}</p>
+                            <p className="text-sm text-slate-500">
+                              ${tier.min.toLocaleString()} - {tier.max ? `$${tier.max.toLocaleString()}` : "∞"} / month
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-semibold">{tier.rate}%</p>
+                          <p className="text-sm text-slate-500">per transaction</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
+              </CardContent>
+            </Card>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h4 className="font-medium text-blue-900 mb-2">Requirements</h4>
-                <ul className="text-sm text-blue-800 space-y-1">
-                  <li>• Stripe account with Issuing enabled</li>
-                  <li>• Connected account must be verified</li>
-                  <li>• Business account (not individual)</li>
-                </ul>
-              </div>
-
-              {!stripeStatus?.connected && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                  <h4 className="font-medium text-amber-900 mb-2">Configuration Required</h4>
-                  <p className="text-sm text-amber-800">
-                    To enable Stripe Connect, add these environment variables:
-                  </p>
-                  <ul className="text-sm text-amber-800 mt-2 space-y-1 font-mono">
-                    <li>• STRIPE_CONNECT_CLIENT_ID</li>
-                    <li>• STRIPE_SECRET_KEY</li>
-                    <li>• NEXT_PUBLIC_APP_URL</li>
-                  </ul>
+            {/* Rail Multipliers */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Payment Rail Discounts</CardTitle>
+                <CardDescription>
+                  Different payment methods have different costs. Crypto rails get discounted fees.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { name: "Card (Stripe)", multiplier: "1.0x", icon: "💳" },
+                    { name: "ACP (OpenAI)", multiplier: "1.0x", icon: "🤖" },
+                    { name: "AP2 (Google)", multiplier: "0.8x", icon: "🔷" },
+                    { name: "x402 (USDC)", multiplier: "0.6x", icon: "💰", comingSoon: true },
+                    { name: "L402 (Lightning)", multiplier: "0.5x", icon: "⚡", comingSoon: true },
+                  ].map((rail) => (
+                    <div 
+                      key={rail.name}
+                      className="flex items-center justify-between p-3 rounded-lg border"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <span className="text-xl">{rail.icon}</span>
+                        <span className="font-medium">{rail.name}</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-600">{rail.multiplier}</span>
+                        {rail.comingSoon && (
+                          <Badge variant="secondary" className="text-xs">Soon</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                <p className="text-sm text-slate-500 mt-4">
+                  Effective fee = Base tier rate × Rail multiplier
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="api">
@@ -435,6 +663,22 @@ export default function SettingsPage() {
       "name": "Figma"
     }
   }'`}
+                </pre>
+              </div>
+
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                <h4 className="font-medium text-emerald-900 mb-2">Response now includes fee info</h4>
+                <pre className="text-xs bg-slate-900 text-slate-100 p-4 rounded-lg overflow-x-auto">
+{`{
+  "status": "approved",
+  "card": { "number": "...", ... },
+  "hard_limit_amount": 129.99,
+  "fee": {
+    "amount": 3.90,
+    "rate": "3.0%",
+    "tier": "starter"
+  }
+}`}
                 </pre>
               </div>
             </CardContent>

@@ -18,6 +18,8 @@ Top-level organization/company with budget settings and guardrails.
   monthly_budget: number (nullable) // Total org spending limit
   alert_threshold: number (default 0.8) // Alert at 80%
   guardrails: string (JSON) // Org-wide rules
+  stripe_customer_id: string (nullable) // Phase 0: Stripe Customer for saved cards
+  billing_email: string (nullable) // Phase 0: Email for billing notifications
   created_at: timestamp
   updated_at: timestamp
 }
@@ -164,6 +166,11 @@ Purchase requests from agents.
   status: 'pending' | 'pending_approval' | 'approved' | 'rejected' | 'expired'
   rejection_reason: string (nullable)
   rejection_code: string (nullable)
+  // Phase 0: Multi-protocol and fee support
+  protocol: string (default 'stripe_card') // 'stripe_card', 'acp', 'ap2', 'x402', 'l402'
+  protocol_tx_id: string (nullable) // External protocol transaction ID
+  fee_amount: number (decimal, nullable) // Roony's fee for this transaction
+  stripe_pre_auth_id: string (nullable) // PaymentIntent ID for pre-authorization
   created_at: timestamp
   updated_at: timestamp
 }
@@ -310,6 +317,90 @@ Audit trail of all actions.
   ip_address: string (nullable)
   user_agent: string (nullable)
   created_at: timestamp
+}
+```
+
+---
+
+## Phase 0 Tables (Saved Cards & Fees)
+
+### customer_payment_methods
+
+Saved payment methods for organizations (replaces stripe_connections).
+
+```typescript
+{
+  id: string (primary key, uuid)
+  organization_id: string (foreign key → organizations.id)
+  stripe_customer_id: string // Stripe Customer ID
+  stripe_payment_method_id: string // Stripe PaymentMethod ID
+  type: string (default 'card') // 'card', 'bank_account'
+  brand: string (nullable) // 'visa', 'mastercard', etc.
+  last4: string
+  exp_month: number (nullable)
+  exp_year: number (nullable)
+  is_default: boolean (default false)
+  status: 'active' | 'expired' | 'failed'
+  created_at: timestamp
+  updated_at: timestamp
+}
+```
+
+### transaction_fees
+
+Tracks Roony's fees per transaction.
+
+```typescript
+{
+  id: string (primary key, uuid)
+  purchase_intent_id: string (foreign key → purchase_intents.id)
+  protocol: string // 'stripe_card', 'acp', 'ap2', 'x402', 'l402'
+  transaction_amount: number (decimal)
+  volume_tier: string // 'starter', 'growth', 'business', 'enterprise'
+  base_rate: number (decimal) // e.g., 0.03 for 3%
+  rail_multiplier: number (decimal, default 1.0)
+  effective_rate: number (decimal) // base_rate * rail_multiplier
+  fee_amount: number (decimal)
+  total_charged: number (decimal) // transaction_amount + fee_amount
+  stripe_charge_id: string (nullable) // ID of the charge to customer's card
+  status: 'pending' | 'charged' | 'failed' | 'refunded'
+  charged_at: timestamp (nullable)
+  created_at: timestamp
+}
+```
+
+### monthly_volumes
+
+Tracks org volume for fee tier calculation.
+
+```typescript
+{
+  id: string (primary key, uuid)
+  organization_id: string (foreign key → organizations.id)
+  month: string // '2025-12' format
+  total_volume: number (decimal, default 0)
+  transaction_count: number (default 0)
+  fee_revenue: number (decimal, default 0)
+  volume_tier: string (nullable) // Current tier based on volume
+  by_protocol: string (JSON) // {"stripe_card": 5000, "x402": 2000}
+  created_at: timestamp
+  updated_at: timestamp
+}
+```
+
+**Unique constraint**: (organization_id, month)
+
+### treasury_balances
+
+Roony's treasury balances for different payment rails (Phase 3+).
+
+```typescript
+{
+  id: string (primary key, uuid)
+  rail: string (unique) // 'stripe_issuing', 'usdc_base', 'lightning'
+  balance: number (decimal, default 0)
+  last_rebalance_at: timestamp (nullable)
+  updated_at: timestamp
 }
 ```
 

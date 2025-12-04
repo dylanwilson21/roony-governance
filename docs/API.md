@@ -84,7 +84,12 @@ Content-Type: application/json
   },
   "hard_limit_amount": 129.99,
   "currency": "usd",
-  "expires_at": "2025-11-27T00:00:00Z"
+  "expires_at": "2025-11-27T00:00:00Z",
+  "fee": {
+    "amount": 3.90,
+    "rate": "3.0%",
+    "tier": "starter"
+  }
 }
 ```
 
@@ -123,8 +128,8 @@ Content-Type: application/json
 | `MERCHANT_NOT_ALLOWED` | Merchant not in agent's allowed list |
 | `CATEGORY_BLOCKED` | Matches org's blocked category |
 | `AGENT_NOT_FOUND` | Agent doesn't exist |
-| `NO_STRIPE_CONNECTION` | Stripe not connected |
-| `STRIPE_CONNECTION_INACTIVE` | Stripe connection inactive |
+| `NO_PAYMENT_METHOD` | No payment method configured |
+| `PREAUTH_FAILED` | Card pre-authorization failed |
 | `CARD_CREATION_FAILED` | Failed to create virtual card |
 
 ---
@@ -382,26 +387,78 @@ Get dashboard analytics.
 
 ---
 
-### Stripe Connection
+### Payment Methods (Phase 0+)
 
-#### GET /api/stripe/connect
-Initiates Stripe Connect OAuth flow. Redirects to Stripe.
-
-#### GET /api/stripe/connect/status
-Check connection status.
+#### GET /api/internal/payment-methods
+List all payment methods for the organization.
 
 **Response:**
 ```json
 {
-  "connected": true,
-  "status": "active",
-  "accountId": "acct_xxxxx",
-  "connectedAt": "2025-11-28T00:00:00Z"
+  "paymentMethods": [
+    {
+      "id": "uuid",
+      "stripePaymentMethodId": "pm_xxx",
+      "type": "card",
+      "brand": "visa",
+      "last4": "4242",
+      "expMonth": 12,
+      "expYear": 2030,
+      "isDefault": true,
+      "status": "active",
+      "createdAt": "2025-12-01T00:00:00Z"
+    }
+  ]
 }
 ```
 
-#### DELETE /api/stripe/connect/status
-Disconnect Stripe account.
+#### POST /api/internal/payment-methods
+Add a new payment method.
+
+**Request:**
+```json
+{
+  "paymentMethodId": "pm_xxx"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "stripePaymentMethodId": "pm_xxx",
+  "type": "card",
+  "brand": "visa",
+  "last4": "4242",
+  "expMonth": 12,
+  "expYear": 2030,
+  "isDefault": true,
+  "status": "active"
+}
+```
+
+#### DELETE /api/internal/payment-methods/:id
+Remove a payment method.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Payment method removed"
+}
+```
+
+#### PUT /api/internal/payment-methods/:id/default
+Set a payment method as the default.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Default payment method updated",
+  "id": "uuid"
+}
+```
 
 ---
 

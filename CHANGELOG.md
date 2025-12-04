@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 0: Foundation (December 4, 2025)
+
+Replaced Stripe Connect OAuth model with saved payment methods + transaction-based fees.
+
+#### Added
+- **Customer Payment Methods**
+  - `customer_payment_methods` table for saved cards
+  - `lib/stripe/customers.ts` - Stripe Customer management
+  - `lib/stripe/payment-methods.ts` - Payment method CRUD and pre-auth
+  - API endpoints: `GET/POST /api/internal/payment-methods`
+  - API endpoints: `DELETE /api/internal/payment-methods/[id]`
+  - API endpoints: `PUT /api/internal/payment-methods/[id]/default`
+
+- **Transaction-Based Fee System**
+  - `transaction_fees` table for fee tracking
+  - `monthly_volumes` table for tier calculation
+  - `lib/billing/fees.ts` - Fee calculation and volume tracking
+  - Volume tiers: Starter (3%), Growth (2.5%), Business (2%), Enterprise (1.5%)
+  - Rail multipliers for future protocols (ACP, AP2, x402, L402)
+
+- **New Purchase Flow**
+  - Pre-authorize customer's card before creating virtual card
+  - Cards issued from Roony's master Stripe Issuing account
+  - Capture exact amount + fee on webhook
+  - Fee info included in API response
+
+- **Updated Settings UI**
+  - Payment Methods tab (add/remove cards, set default)
+  - Billing & Fees tab (current tier, pricing info)
+  - Removed Stripe Connect tab
+
+- **Database Schema Updates**
+  - `organizations.stripe_customer_id` - For saved payment methods
+  - `organizations.billing_email` - For billing notifications
+  - `purchase_intents.protocol` - Multi-protocol support
+  - `purchase_intents.fee_amount` - Transaction fee
+  - `purchase_intents.stripe_pre_auth_id` - Pre-auth reference
+  - `virtual_cards.is_recurring` - Subscription support
+  - `treasury_balances` table - For future crypto rails
+
+#### Removed
+- `lib/stripe/connect.ts` - Stripe Connect OAuth library
+- `app/api/stripe/connect/route.ts` - OAuth initiation
+- `app/api/stripe/connect/callback/route.ts` - OAuth callback
+- `app/api/stripe/connect/status/route.ts` - Connection status
+
+#### Changed
+- `lib/stripe/issuing.ts` - Now uses Roony's master account, not connected accounts
+- `app/api/v1/purchase_intent/route.ts` - Added pre-auth and fee calculation
+- `app/api/webhooks/stripe/route.ts` - Added capture logic for pre-auths
+- Settings page now has Payment Methods and Billing tabs instead of Stripe Connection
+
+#### Environment Variables
+- `ROONY_CARDHOLDER_ID` - Required for issuing cards (Roony's cardholder ID)
+
+---
+
+### Implementation Roadmap v2.0 (December 4, 2025)
+
+Created comprehensive implementation roadmap for transforming Roony into a Universal AI Agent Payment Platform.
+
+#### Added
+- **docs/IMPLEMENTATION_ROADMAP.md** - Full 15-week implementation plan including:
+  - Executive summary with vision diagram
+  - Phase Overview (0-5) with timelines
+  - Fee structure documentation (volume tiers, rail multipliers)
+  
+- **Phase Quick Start Sections** - Each phase now includes:
+  - "Why This Phase?" business context
+  - Prerequisites checklist
+  - Complete file list (CREATE, MODIFY, DELETE)
+  - Step-by-step implementation order
+  - Testing commands with expected outputs
+  - Environment variables to add
+  - Common issues and solutions
+
+- **Before You Start Section** - Required reading and codebase orientation:
+  - Key files to understand
+  - Development environment setup
+  - Document cross-references
+
+#### Phases Documented
+- **Phase 0**: Foundation - Saved cards, fee system, remove Stripe Connect
+- **Phase 1**: Core Protocols - ACP (OpenAI), AP2 (Google), A2A discovery
+- **Phase 2**: Critical Features - Refunds, notifications, subscriptions
+- **Phase 3**: Crypto Rails - x402 (USDC), L402 (Lightning)
+- **Phase 4**: Enterprise - RBAC, compliance, accounting export
+- **Phase 5**: Polish & Scale - Anomaly detection, caching, documentation
+
+---
+
 ### Simplified Governance Model (November 30, 2025)
 
 Major refactor to simplify the governance model based on real-world expense management best practices.

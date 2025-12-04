@@ -1,14 +1,14 @@
 # Development Status
 
-**Last Updated**: November 30, 2025
+**Last Updated**: December 4, 2025
 
 ## Project Overview
 
 Roony is a financial firewall for AI agents. It sits between AI agents and payment systems, evaluating purchase requests in real-time and issuing just-in-time virtual cards via Stripe Issuing.
 
-## Current Status: MVP Complete + Simplified Governance ✅
+## Current Status: MVP Complete + Phase 0 (Foundation) ✅
 
-The MVP is fully functional with a recently simplified governance model.
+The MVP is fully functional with a simplified governance model and the new Phase 0 foundation (saved payment methods + transaction fees).
 
 ## Governance Model
 
@@ -62,11 +62,13 @@ Purchases that require human review go to the **Approvals** page where admins ca
 - `GET /api/internal/transactions` - Transaction history
 - `GET /api/internal/analytics` - Dashboard analytics
 
+**Payment Methods APIs** (Phase 0+):
+- `GET/POST /api/internal/payment-methods` - List/add payment methods
+- `DELETE /api/internal/payment-methods/[id]` - Remove payment method
+- `PUT /api/internal/payment-methods/[id]/default` - Set default
+
 **Stripe APIs**:
-- `GET /api/stripe/connect` - Initiate OAuth
-- `GET /api/stripe/connect/callback` - OAuth callback
-- `GET/DELETE /api/stripe/connect/status` - Connection status
-- `POST /api/webhooks/stripe` - Webhook handler
+- `POST /api/webhooks/stripe` - Webhook handler (enhanced for pre-auth capture)
 
 **Auth APIs**:
 - `POST /api/auth/register` - User registration
@@ -75,13 +77,15 @@ Purchases that require human review go to the **Approvals** page where admins ca
 #### Core Libraries
 
 - `lib/auth/config.ts` - NextAuth configuration
-- `lib/database/schema.ts` - Drizzle ORM schema
+- `lib/database/schema.ts` - Drizzle ORM schema (updated for Phase 0)
 - `lib/database/index.ts` - Database connection
-- `lib/spending/checker.ts` - **NEW** Simplified spending checks
+- `lib/spending/checker.ts` - Simplified spending checks
 - `lib/budget/tracker.ts` - Budget tracking
 - `lib/stripe/client.ts` - Stripe client
-- `lib/stripe/connect.ts` - Stripe Connect OAuth
-- `lib/stripe/issuing.ts` - Virtual card creation
+- `lib/stripe/customers.ts` - **Phase 0** Stripe Customer management
+- `lib/stripe/payment-methods.ts` - **Phase 0** Payment method CRUD + pre-auth
+- `lib/stripe/issuing.ts` - Virtual card creation (updated for Roony master account)
+- `lib/billing/fees.ts` - **Phase 0** Fee calculation and volume tracking
 - `lib/mcp/server.ts` - MCP protocol server
 - `lib/mcp/tools.ts` - MCP tool definitions
 - `lib/mcp/handlers.ts` - MCP tool execution
@@ -107,21 +111,25 @@ Purchases that require human review go to the **Approvals** page where admins ca
 ### Database Schema
 
 Tables in `lib/database/schema.ts`:
-- `organizations` - Orgs with `monthlyBudget`, `alertThreshold`, `guardrails`
+- `organizations` - Orgs with `monthlyBudget`, `alertThreshold`, `guardrails`, `stripeCustomerId`
 - `users` - User accounts
 - `teams` - Agent groupings (for reporting)
 - `projects` - Project groupings
-- `stripe_connections` - Stripe OAuth tokens
+- `stripe_connections` - Legacy Stripe OAuth tokens (deprecated)
 - `agents` - AI agents with spending controls built-in
-- `known_merchants` - **NEW** Tracks merchants for new vendor detection
-- `pending_approvals` - **NEW** Human review queue
-- `purchase_intents` - Purchase requests
-- `virtual_cards` - Created cards
+- `known_merchants` - Tracks merchants for new vendor detection
+- `pending_approvals` - Human review queue
+- `purchase_intents` - Purchase requests (with `protocol`, `feeAmount`, `stripePreAuthId`)
+- `virtual_cards` - Created cards (with `isRecurring`, `subscriptionId`)
 - `transactions` - Settled transactions
 - `budget_tracking` - Spend tracking
 - `blocked_attempts` - Rejection logs
 - `audit_logs` - Audit trail
-- `policies` - **DEPRECATED** Old policy system (kept for data)
+- `policies` - **DEPRECATED** Old policy system
+- `customer_payment_methods` - **Phase 0** Saved payment methods
+- `transaction_fees` - **Phase 0** Fee records per transaction
+- `monthly_volumes` - **Phase 0** Volume tracking for tier calculation
+- `treasury_balances` - **Phase 0** Treasury for future crypto rails
 
 ## File Structure
 
@@ -169,7 +177,9 @@ DATABASE_URL=file:./roony.db
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_CONNECT_CLIENT_ID=ca_...
+
+# Phase 0: Roony's Issuing Account
+ROONY_CARDHOLDER_ID=ich_xxx  # Create in Stripe Dashboard > Issuing > Cardholders
 
 # NextAuth
 NEXTAUTH_URL=http://localhost:3000
@@ -205,7 +215,15 @@ stripe listen --forward-to localhost:3000/api/webhooks/stripe
 3. Set organization monthly budget (e.g., $10,000)
 4. Set any guardrails (e.g., max transaction $1000, approval above $500)
 
-### 2. Create Agent
+### 2. Add Payment Method (Phase 0+)
+1. Go to `/dashboard/settings` → "Payment Methods"
+2. In development, payment methods can be added via API:
+```bash
+# This requires a Stripe PaymentMethod ID (pm_xxx)
+# In test mode, use Stripe's test payment method tokens
+```
+
+### 3. Create Agent
 1. Go to `/dashboard/agents`
 2. Click "Create Agent"
 3. Set spending limits (e.g., $500/month, $100/day, $50/transaction)
@@ -213,7 +231,7 @@ stripe listen --forward-to localhost:3000/api/webhooks/stripe
 5. Enable "Flag new vendor purchases"
 6. Save and copy the API key!
 
-### 3. Test Purchase
+### 4. Test Purchase
 
 ```bash
 # Should be approved (under all limits)
@@ -227,10 +245,16 @@ curl -X POST http://localhost:3000/api/v1/purchase_intent \
     "merchant": {"name": "Test Merchant"}
   }'
 
-# Response will be:
-# - "approved" with card details, OR
-# - "pending_approval" if triggers review, OR
-# - "rejected" with reason
+# Response now includes fee info:
+# {
+#   "status": "approved",
+#   "card": { ... },
+#   "fee": { "amount": 0.60, "rate": "3.0%", "tier": "starter" }
+# }
+
+# Or:
+# - "pending_approval" if triggers review
+# - "rejected" with reason (including "NO_PAYMENT_METHOD" if no card added)
 ```
 
 ### 4. Review Approvals
@@ -259,16 +283,52 @@ curl -X POST http://localhost:3000/api/mcp \
   }'
 ```
 
-## What Could Be Added (Post-MVP)
+## Roadmap: v2.0 Universal AI Agent Payment Platform
 
-1. **Charts** - Install recharts for analytics visualizations
-2. **Email notifications** - Alert on purchases needing approval
-3. **Slack integration** - Approval notifications in Slack
-4. **MCC filtering** - Merchant category code support
-5. **Dark mode** - Theme toggle
-6. **Export functionality** - CSV export of transactions
-7. **Rate limiting** - API rate limits
-8. **Multi-org support** - Users in multiple organizations
+A comprehensive implementation plan exists in `docs/IMPLEMENTATION_ROADMAP.md` to transform Roony into a universal platform supporting multiple protocols and payment rails.
+
+### Key Transformations Planned
+
+| Current (v1.0) | Future (v2.0) |
+|----------------|---------------|
+| Stripe Connect OAuth required | Just add a credit/debit card |
+| MCP protocol only | MCP + ACP (OpenAI) + AP2 (Google) + A2A |
+| Stripe cards only | Stripe + x402 (USDC) + L402 (Lightning) |
+| No fee revenue | Transaction-based fees (1-3%) |
+| Single user per org | RBAC with roles (Owner, Admin, Finance, etc.) |
+
+### Phases Overview
+
+| Phase | Duration | Focus | Status |
+|-------|----------|-------|--------|
+| **0** | 2 weeks | Saved cards model, fee system | ✅ **Complete** |
+| **1** | 3 weeks | ACP + AP2 protocol support | Pending |
+| **2** | 3 weeks | Refunds, notifications, subscriptions | Pending |
+| **3** | 2 weeks | Crypto rails (x402, L402) | Pending |
+| **4** | 3 weeks | RBAC, compliance, accounting | Pending |
+| **5** | 2 weeks | Anomaly detection, performance | Pending |
+
+**Total: ~15 weeks** (Phase 0 complete, ~13 weeks remaining)
+
+See `docs/IMPLEMENTATION_ROADMAP.md` for full implementation details including:
+- Quick start guide for each phase
+- File lists (create/modify/delete)
+- Database schemas
+- API endpoints
+- Testing commands
+
+## Legacy Enhancement Ideas (Superseded by Roadmap)
+
+These items are now covered in the v2.0 roadmap:
+
+1. ~~**Charts**~~ - Phase 5 includes analytics improvements
+2. ~~**Email notifications**~~ - Phase 2: Notification system
+3. ~~**Slack integration**~~ - Phase 2: Notification channels
+4. ~~**MCC filtering**~~ - Phase 4: Enhanced compliance
+5. **Dark mode** - Future UI enhancement
+6. ~~**Export functionality**~~ - Phase 4: Accounting export
+7. ~~**Rate limiting**~~ - Phase 5: Performance
+8. ~~**Multi-org support**~~ - Phase 4: RBAC
 
 ## Known Limitations
 

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/database";
-import { agents, purchaseIntents, virtualCards, stripeConnections, pendingApprovals } from "@/lib/database/schema";
+import { agents, purchaseIntents, virtualCards, pendingApprovals, organizations } from "@/lib/database/schema";
 import { eq } from "drizzle-orm";
 import { checkSpending, createPendingApproval, recordMerchant } from "@/lib/spending/checker";
-import { createVirtualCard, getCardDetails } from "@/lib/stripe/issuing";
+import { createVirtualCard, getFullCardDetails } from "@/lib/stripe/issuing";
+import { getDefaultPaymentMethod, preAuthorizeCard } from "@/lib/stripe/payment-methods";
+import { calculateFeeWithTier, recordTransactionFee, getPreAuthBuffer } from "@/lib/billing/fees";
 import crypto from "crypto";
 
 interface PurchaseIntentRequest {
@@ -16,6 +18,7 @@ interface PurchaseIntentRequest {
     url?: string;
   };
   metadata?: Record<string, string>;
+  protocol?: string; // Optional - defaults to 'stripe_card'
 }
 
 /**
@@ -46,7 +49,15 @@ async function authenticateAgent(apiKey: string) {
  * POST /api/v1/purchase_intent
  * 
  * Agent endpoint for requesting purchase approval
- * Uses simplified agent-level spending controls
+ * 
+ * Phase 0 Flow:
+ * 1. Authenticate agent
+ * 2. Check spending limits
+ * 3. Get customer's default payment method
+ * 4. Pre-authorize customer's card (amount + fee + buffer)
+ * 5. Create JIT virtual card from Roony's account
+ * 6. Return card to agent
+ * 7. (Webhook handles capture after merchant charges card)
  */
 export async function POST(request: NextRequest) {
   try {
@@ -71,6 +82,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body: PurchaseIntentRequest = await request.json();
+    const protocol = body.protocol || "stripe_card";
 
     // Validate request
     if (!body.amount || !body.currency || !body.description || !body.merchant?.name) {
@@ -88,6 +100,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Calculate fee for this transaction
+    const { tier, fee, totalToCharge } = await calculateFeeWithTier(
+      agent.organizationId,
+      body.amount,
+      protocol
+    );
+
     // Create purchase intent record
     const purchaseIntent = await db
       .insert(purchaseIntents)
@@ -101,6 +120,8 @@ export async function POST(request: NextRequest) {
         merchantUrl: body.merchant.url,
         metadata: body.metadata ? JSON.stringify(body.metadata) : null,
         status: "pending",
+        protocol,
+        feeAmount: fee.amount,
       })
       .returning();
 
@@ -162,70 +183,95 @@ export async function POST(request: NextRequest) {
         status: "pending_approval",
         message: checkResult.approvalReason || "This purchase requires human approval",
         purchase_intent_id: intent.id,
+        fee: {
+          amount: fee.amount,
+          rate: `${(fee.effectiveRate * 100).toFixed(1)}%`,
+        },
       });
     }
 
-    // Approved - create virtual card
-    // Get Stripe connection
-    const connections = await db
-      .select()
-      .from(stripeConnections)
-      .where(
-        eq(stripeConnections.organizationId, agent.organizationId)
-      )
-      .limit(1);
+    // === Phase 0: New Flow - Pre-authorize customer's card and issue from Roony ===
 
-    if (connections.length === 0) {
+    // Get customer's default payment method
+    const paymentMethod = await getDefaultPaymentMethod(agent.organizationId);
+    
+    if (!paymentMethod) {
       await db
         .update(purchaseIntents)
         .set({
           status: "rejected",
-          rejectionReason: "No Stripe connection found",
-          rejectionCode: "NO_STRIPE_CONNECTION",
+          rejectionReason: "No payment method found",
+          rejectionCode: "NO_PAYMENT_METHOD",
         })
         .where(eq(purchaseIntents.id, intent.id));
 
       return NextResponse.json(
         {
           status: "rejected",
-          reason_code: "NO_STRIPE_CONNECTION",
-          message: "Organization has not connected Stripe account",
+          reason_code: "NO_PAYMENT_METHOD",
+          message: "Organization has not added a payment method. Please add a card in Settings → Payment Methods.",
         },
         { status: 400 }
       );
     }
 
-    const connection = connections[0];
-    if (connection.status !== "active") {
-      await db
-        .update(purchaseIntents)
-        .set({
-          status: "rejected",
-          rejectionReason: "Stripe connection is not active",
-          rejectionCode: "STRIPE_CONNECTION_INACTIVE",
-        })
-        .where(eq(purchaseIntents.id, intent.id));
-
-      return NextResponse.json(
-        {
-          status: "rejected",
-          reason_code: "STRIPE_CONNECTION_INACTIVE",
-          message: "Stripe connection is not active",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Create virtual card
+    // Pre-authorize customer's card (amount + fee + buffer)
+    const preAuthAmount = getPreAuthBuffer(totalToCharge);
+    
+    let preAuth;
     try {
-      const card = await createVirtualCard(connection.connectedAccountId, {
+      preAuth = await preAuthorizeCard(
+        paymentMethod.stripeCustomerId,
+        paymentMethod.stripePaymentMethodId,
+        preAuthAmount,
+        body.currency,
+        {
+          purchaseIntentId: intent.id,
+          agentId: agent.id,
+          organizationId: agent.organizationId,
+          type: "purchase_pre_auth",
+        }
+      );
+    } catch (preAuthError) {
+      console.error("Pre-authorization failed:", preAuthError);
+      
+      await db
+        .update(purchaseIntents)
+        .set({
+          status: "rejected",
+          rejectionReason: "Card pre-authorization failed",
+          rejectionCode: "PREAUTH_FAILED",
+        })
+        .where(eq(purchaseIntents.id, intent.id));
+
+      return NextResponse.json(
+        {
+          status: "rejected",
+          reason_code: "PREAUTH_FAILED",
+          message: "Unable to authorize your payment method. Please check your card or add a new one.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Store pre-auth ID on purchase intent
+    await db
+      .update(purchaseIntents)
+      .set({ stripePreAuthId: preAuth.id })
+      .where(eq(purchaseIntents.id, intent.id));
+
+    // Create virtual card from Roony's master Issuing account
+    try {
+      const card = await createVirtualCard({
         amount: body.amount,
         currency: body.currency,
-        expiresInHours: 1, // Card expires in 1 hour
+        organizationId: agent.organizationId,
+        agentId: agent.id,
+        purchaseIntentId: intent.id,
       });
 
       // Get card details (PAN, CVC, etc.)
-      const cardDetails = await getCardDetails(connection.connectedAccountId, card.id);
+      const cardDetails = await getFullCardDetails(card.id);
 
       // Calculate expiry
       const expiresAt = new Date();
@@ -246,6 +292,15 @@ export async function POST(request: NextRequest) {
           expiresAt,
         })
         .returning();
+
+      // Record fee (pending until capture)
+      await recordTransactionFee(
+        intent.id,
+        protocol,
+        body.amount,
+        tier,
+        fee
+      );
 
       // Update purchase intent
       await db
@@ -272,10 +327,23 @@ export async function POST(request: NextRequest) {
         hard_limit_amount: body.amount,
         currency: body.currency,
         expires_at: expiresAt.toISOString(),
+        fee: {
+          amount: fee.amount,
+          rate: `${(fee.effectiveRate * 100).toFixed(1)}%`,
+          tier: tier.name,
+        },
       });
     } catch (error) {
       console.error("Error creating virtual card:", error);
       
+      // Cancel the pre-authorization since card creation failed
+      try {
+        const { cancelPreAuth } = await import("@/lib/stripe/payment-methods");
+        await cancelPreAuth(preAuth.id);
+      } catch (cancelError) {
+        console.error("Failed to cancel pre-auth:", cancelError);
+      }
+
       await db
         .update(purchaseIntents)
         .set({
