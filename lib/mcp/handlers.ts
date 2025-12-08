@@ -152,13 +152,35 @@ export async function executeRequestPurchase(
 
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
+  // Parse and validate card expiration
+  const expMonth = parseInt(alphaCardDetails.exp_month, 10);
+  const expYear = parseInt(alphaCardDetails.exp_year, 10);
+  
+  if (isNaN(expMonth) || expMonth < 1 || expMonth > 12) {
+    return jsonResult({
+      status: "rejected",
+      reason_code: "INVALID_CARD",
+      message: "Invalid card expiration month. Must be 1-12.",
+      suggestion: "Update your card details in Settings → Alpha Card.",
+    });
+  }
+  
+  if (isNaN(expYear) || expYear < new Date().getFullYear()) {
+    return jsonResult({
+      status: "rejected",
+      reason_code: "INVALID_CARD",
+      message: "Invalid or expired card year.",
+      suggestion: "Update your card details in Settings → Alpha Card.",
+    });
+  }
+
   // Record the virtual card (using stored card info)
   await db.insert(virtualCards).values({
     purchaseIntentId: intent[0].id,
     stripeCardId: `alpha_${intent[0].id.slice(0, 8)}`,
     last4: alphaCardDetails.number?.slice(-4) || "****",
-    expMonth: parseInt(alphaCardDetails.exp_month) || 12,
-    expYear: parseInt(alphaCardDetails.exp_year) || new Date().getFullYear() + 1,
+    expMonth,
+    expYear,
     hardLimit: amount as number,
     currency: currency as string,
     status: "active",
