@@ -29,6 +29,12 @@ interface OrgSettings {
     flagAllNewVendors?: boolean;
     maxTransactionAmount?: number | null;
   };
+  alphaCardDetails?: {
+    last4: string;
+    exp_month: string;
+    exp_year: string;
+    hasCard: boolean;
+  } | null;
 }
 
 interface VolumeInfo {
@@ -93,6 +99,15 @@ export default function SettingsPage() {
     flagAllNewVendors: false,
     maxTransactionAmount: "",
   });
+
+  // Alpha card form state
+  const [alphaCardForm, setAlphaCardForm] = useState({
+    number: "",
+    exp_month: "",
+    exp_year: "",
+    cvc: "",
+  });
+  const [savingCard, setSavingCard] = useState(false);
 
   useEffect(() => {
     fetchPaymentMethods();
@@ -246,6 +261,72 @@ export default function SettingsPage() {
     }
   }
 
+  async function saveAlphaCard() {
+    // Validate card details
+    if (!alphaCardForm.number || !alphaCardForm.exp_month || !alphaCardForm.exp_year || !alphaCardForm.cvc) {
+      alert("Please fill in all card fields");
+      return;
+    }
+
+    setSavingCard(true);
+    try {
+      const res = await fetch("/api/internal/settings/organization", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          alphaCardDetails: {
+            number: alphaCardForm.number.replace(/\s/g, ""),
+            exp_month: alphaCardForm.exp_month,
+            exp_year: alphaCardForm.exp_year,
+            cvc: alphaCardForm.cvc,
+          },
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setOrgSettings(data);
+        // Clear the form
+        setAlphaCardForm({ number: "", exp_month: "", exp_year: "", cvc: "" });
+        alert("Card saved successfully!");
+      } else {
+        alert("Failed to save card");
+      }
+    } catch (error) {
+      console.error("Error saving card:", error);
+      alert("Failed to save card");
+    } finally {
+      setSavingCard(false);
+    }
+  }
+
+  async function removeAlphaCard() {
+    if (!confirm("Are you sure you want to remove this card?")) {
+      return;
+    }
+
+    setSavingCard(true);
+    try {
+      const res = await fetch("/api/internal/settings/organization", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alphaCardDetails: null }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setOrgSettings(data);
+        alert("Card removed");
+      } else {
+        alert("Failed to remove card");
+      }
+    } catch (error) {
+      console.error("Error removing card:", error);
+    } finally {
+      setSavingCard(false);
+    }
+  }
+
   function getBrandIcon(brand: string | null) {
     const brandLower = brand?.toLowerCase() || "";
     if (brandLower === "visa") {
@@ -266,13 +347,141 @@ export default function SettingsPage() {
         <SettingsMessages />
       </Suspense>
 
-      <Tabs defaultValue="guardrails" className="space-y-6">
+      <Tabs defaultValue="alpha-card" className="space-y-6">
         <TabsList>
+          <TabsTrigger value="alpha-card">Alpha Card</TabsTrigger>
           <TabsTrigger value="guardrails">Spending Guardrails</TabsTrigger>
           <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
           <TabsTrigger value="billing">Billing & Fees</TabsTrigger>
           <TabsTrigger value="api">API Configuration</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="alpha-card">
+          <div className="space-y-6">
+            {/* Warning Banner */}
+            <Card className="bg-amber-50 border-amber-200">
+              <CardContent className="pt-6">
+                <div className="flex items-start space-x-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div>
+                    <h4 className="font-semibold text-amber-900">Alpha Version - Use a Virtual Card</h4>
+                    <p className="text-sm text-amber-800 mt-1">
+                      This card will be returned to your AI agents when purchases are approved. 
+                      For safety, use a virtual card service like Privacy.com with its own spending limits.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Current Card */}
+            {orgSettings.alphaCardDetails?.hasCard ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Current Card</CardTitle>
+                  <CardDescription>
+                    This card will be used for agent purchases.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border">
+                    <div className="flex items-center space-x-4">
+                      <span className="text-3xl">💳</span>
+                      <div>
+                        <p className="font-medium">
+                          •••• •••• •••• {orgSettings.alphaCardDetails.last4}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          Expires {orgSettings.alphaCardDetails.exp_month}/{orgSettings.alphaCardDetails.exp_year}
+                        </p>
+                      </div>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={removeAlphaCard}
+                      disabled={savingCard}
+                      className="text-red-600 hover:text-red-700 hover:border-red-300"
+                    >
+                      {savingCard ? "Removing..." : "Remove Card"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Add Card for Agent Purchases</CardTitle>
+                  <CardDescription>
+                    Enter the card details that your agents will use when making approved purchases.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="cardNumber">Card Number</Label>
+                    <Input
+                      id="cardNumber"
+                      placeholder="4242 4242 4242 4242"
+                      value={alphaCardForm.number}
+                      onChange={(e) => setAlphaCardForm({ ...alphaCardForm, number: e.target.value })}
+                      maxLength={19}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="expMonth">Exp Month</Label>
+                      <Input
+                        id="expMonth"
+                        placeholder="12"
+                        value={alphaCardForm.exp_month}
+                        onChange={(e) => setAlphaCardForm({ ...alphaCardForm, exp_month: e.target.value })}
+                        maxLength={2}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="expYear">Exp Year</Label>
+                      <Input
+                        id="expYear"
+                        placeholder="2026"
+                        value={alphaCardForm.exp_year}
+                        onChange={(e) => setAlphaCardForm({ ...alphaCardForm, exp_year: e.target.value })}
+                        maxLength={4}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="cvc">CVC</Label>
+                      <Input
+                        id="cvc"
+                        placeholder="123"
+                        type="password"
+                        value={alphaCardForm.cvc}
+                        onChange={(e) => setAlphaCardForm({ ...alphaCardForm, cvc: e.target.value })}
+                        maxLength={4}
+                      />
+                    </div>
+                  </div>
+                  <div className="pt-4">
+                    <Button onClick={saveAlphaCard} disabled={savingCard}>
+                      {savingCard ? "Saving..." : "Save Card"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* How It Works */}
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="pt-6">
+                <h4 className="font-medium text-blue-900 mb-2">How It Works</h4>
+                <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
+                  <li>Your agent requests a purchase through the MCP endpoint</li>
+                  <li>Roony checks the request against your spending limits and guardrails</li>
+                  <li>If approved, your agent receives this card to complete the purchase</li>
+                  <li>If denied, your agent gets the rejection reason</li>
+                </ol>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
         <TabsContent value="guardrails">
           <div className="space-y-6">

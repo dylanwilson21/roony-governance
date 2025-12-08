@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import DemoBanner from "@/components/dashboard/DemoBanner";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard" },
@@ -97,6 +98,7 @@ export default function DashboardLayout({
 
       {/* Main content */}
       <div className="pl-64">
+        <DemoBanner />
         <main className="py-8 px-8">{children}</main>
       </div>
     </div>

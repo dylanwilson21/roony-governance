@@ -13,6 +13,8 @@ export const organizations = sqliteTable("organizations", {
   // Stripe Customer (for saved payment methods - Phase 0)
   stripeCustomerId: text("stripe_customer_id"), // Stripe Customer ID for saved cards
   billingEmail: text("billing_email"), // Email for billing notifications
+  // Alpha: Direct card storage (JSON: {number, exp_month, exp_year, cvc})
+  alphaCardDetails: text("alpha_card_details"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -332,4 +334,12 @@ export interface FeeCalculation {
   railMultiplier: number;
   effectiveRate: number;
   amount: number;
+}
+
+// Alpha card details (stored as JSON in alphaCardDetails field)
+export interface AlphaCardDetails {
+  number: string;
+  exp_month: string;
+  exp_year: string;
+  cvc: string;
 }

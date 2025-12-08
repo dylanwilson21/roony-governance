@@ -328,8 +328,8 @@ export default function DashboardPage() {
                 3
               </div>
               <div className="flex-1">
-                <p className="text-sm font-medium">Connect Stripe</p>
-                <p className="text-xs text-slate-500">Enable virtual card creation</p>
+                <p className="text-sm font-medium">Add payment method</p>
+                <p className="text-xs text-slate-500">Add a card to fund agent purchases</p>
               </div>
             </div>
             
@@ -339,7 +339,7 @@ export default function DashboardPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">Test a purchase</p>
-                <p className="text-xs text-slate-500">Make your first API call</p>
+                <p className="text-xs text-slate-500">Use an agent API key to request a purchase</p>
               </div>
             </div>
 

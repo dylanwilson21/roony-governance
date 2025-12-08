@@ -38,9 +38,37 @@ Organization
 
 ## Current Status
 
-**MVP Complete** ✅ - The application is fully functional and ready for testing.
+**Alpha Ready** ✅ - Ready for early testers. AI agents can make governed purchases.
 
-See **[Development Status](docs/DEVELOPMENT_STATUS.md)** for detailed information on what's built, file structure, and how to test.
+See **[Development Status](docs/DEVELOPMENT_STATUS.md)** for detailed info and **[Quick Start](docs/QUICK_START.md)** for setup instructions.
+
+### ⚠️ Alpha Warning
+
+This is an early alpha. Card details are stored and returned to agents on approval. **Use a virtual card service (Privacy.com, etc.) with its own spending limits** as a second layer of protection.
+
+### Quick Start
+
+```bash
+npm install
+npm run db:push
+npm run dev
+
+# Open http://localhost:3000
+# 1. Create account
+# 2. Settings → Alpha Card → Add your virtual card
+# 3. Settings → Spending Guardrails → Set limits
+# 4. Agents → Create agent → Copy API key
+# 5. Configure Claude Desktop (see docs/QUICK_START.md)
+```
+
+### Demo Mode
+
+For a populated demo dashboard:
+
+```bash
+npm run db:seed-demo
+# Login: demo@acme.ai / demo123
+```
 
 ## Roadmap: v2.0 Universal AI Agent Payment Platform
 
@@ -152,6 +180,7 @@ npm run lint         # Run ESLint
 npm run type-check   # Check TypeScript
 npm run db:push      # Push schema to database
 npm run db:studio    # Open database studio
+npm run db:seed-demo # Seed demo data for testing
 ```
 
 ## How It Works

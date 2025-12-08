@@ -1,14 +1,25 @@
 # Development Status
 
-**Last Updated**: December 4, 2025
+**Last Updated**: December 8, 2025
 
 ## Project Overview
 
-Roony is a financial firewall for AI agents. It sits between AI agents and payment systems, evaluating purchase requests in real-time and issuing just-in-time virtual cards via Stripe Issuing.
+Roony is a financial firewall for AI agents. It sits between AI agents and payment systems, evaluating purchase requests in real-time against spending limits and guardrails.
 
-## Current Status: MVP Complete + Phase 0 (Foundation) ✅
+## Current Status: Alpha Ready ✅
 
-The MVP is fully functional with a simplified governance model and the new Phase 0 foundation (saved payment methods + transaction fees).
+The alpha version is ready for early testers. Users can add a card, set spending limits, and their AI agents will receive the card details when purchases are approved.
+
+### What's New in Alpha
+
+- **Alpha Card Storage** - Users can paste card details directly (stored in org settings)
+- **Real Card on Approval** - MCP endpoint returns actual card details when purchases pass governance
+- **Quick Start Guide** - `docs/QUICK_START.md` with Claude Desktop setup instructions
+- **Simplified Flow** - No Stripe Issuing required, works with any card (virtual recommended)
+
+### Alpha Warning
+
+This is an early alpha. Card details are stored and returned to agents on approval. Users should use a virtual card service (Privacy.com, etc.) with its own spending limits as a second layer of protection.
 
 ## Governance Model
 
@@ -206,6 +217,37 @@ stripe listen --forward-to localhost:3000/api/webhooks/stripe
 
 # Open http://localhost:3000
 ```
+
+## Demo Mode (For Investor Demos)
+
+For a quick demo with pre-populated data:
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Initialize fresh database
+npm run db:push
+
+# 3. Seed demo data
+npm run db:seed-demo
+
+# 4. Start the server
+npm run dev
+
+# 5. Login with demo credentials:
+#    Email: demo@acme.ai
+#    Password: demo123
+```
+
+The demo includes:
+- **4 agents** with different spending limits and controls
+- **14 transactions** (approved, rejected, pending approval)
+- **10 known merchants** (GitHub, AWS, OpenAI, etc.)
+- **3 pending approvals** waiting for review
+- **Organization budget** set to $10,000/month
+
+**Demo Mode Banner**: When no payment methods are configured, a banner appears explaining that spending checks work fully, but virtual card creation requires Stripe Issuing approval.
 
 ## How to Test
 
