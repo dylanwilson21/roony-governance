@@ -159,13 +159,18 @@ export async function POST(request: NextRequest) {
     
     let agentId: string;
     let organizationId: string;
-    let sseSession: typeof sessions extends Map<string, infer V> ? V : never | undefined;
+    let sseSession: {
+      agentId: string;
+      organizationId: string;
+      controller: ReadableStreamDefaultController;
+      encoder: TextEncoder;
+    } | undefined;
 
     // Check if this is part of an SSE session
     if (sessionId && sessions.has(sessionId)) {
-      sseSession = sessions.get(sessionId);
-      agentId = sseSession!.agentId;
-      organizationId = sseSession!.organizationId;
+      sseSession = sessions.get(sessionId)!;
+      agentId = sseSession.agentId;
+      organizationId = sseSession.organizationId;
     } else {
       // Authenticate via header
       const auth = await authenticateRequest(request);
