@@ -1,13 +1,13 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, real, boolean, timestamp, doublePrecision } from "drizzle-orm/pg-core";
 
 // Organizations
-export const organizations = sqliteTable("organizations", {
+export const organizations = pgTable("organizations", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   // Budget settings
-  monthlyBudget: real("monthly_budget"), // Total org budget per month
-  alertThreshold: real("alert_threshold").default(0.8), // Alert at 80% by default
+  monthlyBudget: doublePrecision("monthly_budget"), // Total org budget per month
+  alertThreshold: doublePrecision("alert_threshold").default(0.8), // Alert at 80% by default
   // Organization-wide guardrails (JSON)
   guardrails: text("guardrails"), // JSON: { blockCategories, requireApprovalAbove, flagAllNewVendors, maxTransactionAmount }
   // Stripe Customer (for saved payment methods - Phase 0)
@@ -15,56 +15,56 @@ export const organizations = sqliteTable("organizations", {
   billingEmail: text("billing_email"), // Email for billing notifications
   // Alpha: Direct card storage (JSON: {number, exp_month, exp_year, cvc})
   alphaCardDetails: text("alpha_card_details"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Users
-export const users = sqliteTable("users", {
+export const users = pgTable("users", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
   passwordHash: text("password_hash").notNull(),
   role: text("role", { enum: ["admin", "finance", "developer"] }).notNull().default("developer"),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Teams (for reporting/grouping only)
-export const teams = sqliteTable("teams", {
+export const teams = pgTable("teams", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   name: text("name").notNull(),
   description: text("description"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Projects (optional grouping)
-export const projects = sqliteTable("projects", {
+export const projects = pgTable("projects", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   name: text("name").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Stripe Connections
-export const stripeConnections = sqliteTable("stripe_connections", {
+export const stripeConnections = pgTable("stripe_connections", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   connectedAccountId: text("connected_account_id").notNull(),
   accessTokenEncrypted: text("access_token_encrypted").notNull(),
   refreshTokenEncrypted: text("refresh_token_encrypted"),
-  tokenExpiresAt: integer("token_expires_at", { mode: "timestamp" }),
+  tokenExpiresAt: timestamp("token_expires_at"),
   status: text("status", { enum: ["active", "expired", "revoked"] }).notNull().default("active"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Agents - with spending controls directly on the agent
-export const agents = sqliteTable("agents", {
+export const agents = pgTable("agents", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   teamId: text("team_id").references(() => teams.id),
@@ -75,36 +75,36 @@ export const agents = sqliteTable("agents", {
   status: text("status", { enum: ["active", "paused", "suspended"] }).notNull().default("active"),
   
   // Spending limits
-  monthlyLimit: real("monthly_limit"), // Max spend per month
-  dailyLimit: real("daily_limit"), // Max spend per day
-  perTransactionLimit: real("per_transaction_limit"), // Max per single transaction
+  monthlyLimit: doublePrecision("monthly_limit"), // Max spend per month
+  dailyLimit: doublePrecision("daily_limit"), // Max spend per day
+  perTransactionLimit: doublePrecision("per_transaction_limit"), // Max per single transaction
   
   // Approval rules
-  approvalThreshold: real("approval_threshold"), // Require approval above this amount
-  flagNewVendors: integer("flag_new_vendors", { mode: "boolean" }).default(false), // Flag purchases from new merchants
+  approvalThreshold: doublePrecision("approval_threshold"), // Require approval above this amount
+  flagNewVendors: boolean("flag_new_vendors").default(false), // Flag purchases from new merchants
   
   // Merchant restrictions (JSON arrays)
   blockedMerchants: text("blocked_merchants"), // JSON array of blocked merchant names
   allowedMerchants: text("allowed_merchants"), // JSON array - if set, only these merchants allowed
   
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Known Merchants - track merchant history for new vendor detection
-export const knownMerchants = sqliteTable("known_merchants", {
+export const knownMerchants = pgTable("known_merchants", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   merchantName: text("merchant_name").notNull(),
   merchantNameNormalized: text("merchant_name_normalized").notNull(), // lowercase, trimmed
-  firstSeenAt: integer("first_seen_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
   transactionCount: integer("transaction_count").notNull().default(1),
 });
 
 // Policies - DEPRECATED: Kept for backward compatibility
 // New logic uses agent-level controls instead
-export const policies = sqliteTable("policies", {
+export const policies = pgTable("policies", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   name: text("name").notNull(),
@@ -114,17 +114,17 @@ export const policies = sqliteTable("policies", {
   rules: text("rules").notNull(), // JSON object
   action: text("action", { enum: ["approve", "reject", "require_approval"] }).notNull(),
   priority: integer("priority").notNull().default(0),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Purchase Intents
-export const purchaseIntents = sqliteTable("purchase_intents", {
+export const purchaseIntents = pgTable("purchase_intents", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   agentId: text("agent_id").notNull().references(() => agents.id),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
-  amount: real("amount").notNull(),
+  amount: doublePrecision("amount").notNull(),
   currency: text("currency").notNull().default("usd"),
   description: text("description").notNull(),
   merchantName: text("merchant_name").notNull(),
@@ -136,96 +136,96 @@ export const purchaseIntents = sqliteTable("purchase_intents", {
   // Phase 0: Multi-protocol and fee support
   protocol: text("protocol").default("stripe_card"), // 'stripe_card', 'acp', 'ap2', 'x402', 'l402'
   protocolTxId: text("protocol_tx_id"), // External protocol transaction ID
-  feeAmount: real("fee_amount"), // Roony's fee for this transaction
+  feeAmount: doublePrecision("fee_amount"), // Roony's fee for this transaction
   stripePreAuthId: text("stripe_pre_auth_id"), // PaymentIntent ID for pre-authorization
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Pending Approvals - queue for human review
-export const pendingApprovals = sqliteTable("pending_approvals", {
+export const pendingApprovals = pgTable("pending_approvals", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   purchaseIntentId: text("purchase_intent_id").notNull().references(() => purchaseIntents.id),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   agentId: text("agent_id").notNull().references(() => agents.id),
-  amount: real("amount").notNull(),
+  amount: doublePrecision("amount").notNull(),
   merchantName: text("merchant_name").notNull(),
   reason: text("reason").notNull(), // "OVER_THRESHOLD", "NEW_VENDOR", "ORG_GUARDRAIL"
   reasonDetails: text("reason_details"), // Additional context
   status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
   reviewedBy: text("reviewed_by").references(() => users.id),
-  reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
+  reviewedAt: timestamp("reviewed_at"),
   reviewNotes: text("review_notes"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Virtual Cards
-export const virtualCards = sqliteTable("virtual_cards", {
+export const virtualCards = pgTable("virtual_cards", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   purchaseIntentId: text("purchase_intent_id").notNull().references(() => purchaseIntents.id),
   stripeCardId: text("stripe_card_id").notNull(),
   last4: text("last4").notNull(),
   expMonth: integer("exp_month").notNull(),
   expYear: integer("exp_year").notNull(),
-  hardLimit: real("hard_limit").notNull(),
+  hardLimit: doublePrecision("hard_limit").notNull(),
   currency: text("currency").notNull(),
   status: text("status", { enum: ["active", "used", "expired", "canceled"] }).notNull().default("active"),
-  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  expiresAt: timestamp("expires_at"),
   // Phase 0: Subscription support
-  isRecurring: integer("is_recurring", { mode: "boolean" }).default(false),
+  isRecurring: boolean("is_recurring").default(false),
   subscriptionId: text("subscription_id"), // Reference to future subscriptions table
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Transactions
-export const transactions = sqliteTable("transactions", {
+export const transactions = pgTable("transactions", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   purchaseIntentId: text("purchase_intent_id").notNull().references(() => purchaseIntents.id),
   virtualCardId: text("virtual_card_id").references(() => virtualCards.id),
   stripeChargeId: text("stripe_charge_id").notNull().unique(),
   stripeAuthorizationId: text("stripe_authorization_id"),
-  amount: real("amount").notNull(),
+  amount: doublePrecision("amount").notNull(),
   currency: text("currency").notNull(),
   merchantName: text("merchant_name").notNull(),
   merchantMcc: text("merchant_mcc"),
   status: text("status", { enum: ["authorized", "captured", "failed", "refunded"] }).notNull(),
-  settledAt: integer("settled_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  settledAt: timestamp("settled_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Budget Tracking - simplified for org and agent level
-export const budgetTracking = sqliteTable("budget_tracking", {
+export const budgetTracking = pgTable("budget_tracking", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   agentId: text("agent_id").references(() => agents.id),
   teamId: text("team_id").references(() => teams.id),
   projectId: text("project_id").references(() => projects.id),
   periodType: text("period_type", { enum: ["daily", "weekly", "monthly", "lifetime"] }).notNull(),
-  periodStart: integer("period_start", { mode: "timestamp" }).notNull(),
-  periodEnd: integer("period_end", { mode: "timestamp" }),
-  amountSpent: real("amount_spent").notNull().default(0),
-  amountReserved: real("amount_reserved").notNull().default(0),
-  limit: real("limit"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end"),
+  amountSpent: doublePrecision("amount_spent").notNull().default(0),
+  amountReserved: doublePrecision("amount_reserved").notNull().default(0),
+  limit: doublePrecision("limit"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Blocked Attempts
-export const blockedAttempts = sqliteTable("blocked_attempts", {
+export const blockedAttempts = pgTable("blocked_attempts", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   purchaseIntentId: text("purchase_intent_id").notNull().references(() => purchaseIntents.id),
   agentId: text("agent_id").notNull().references(() => agents.id),
   reasonCode: text("reason_code").notNull(),
   reasonMessage: text("reason_message").notNull(),
   policyId: text("policy_id").references(() => policies.id),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Audit Logs
-export const auditLogs = sqliteTable("audit_logs", {
+export const auditLogs = pgTable("audit_logs", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   userId: text("user_id").references(() => users.id),
   agentId: text("agent_id").references(() => agents.id),
@@ -235,7 +235,7 @@ export const auditLogs = sqliteTable("audit_logs", {
   details: text("details"), // JSON object
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // ============================================
@@ -243,7 +243,7 @@ export const auditLogs = sqliteTable("audit_logs", {
 // ============================================
 
 // Customer Payment Methods - replaces stripe_connections for OAuth
-export const customerPaymentMethods = sqliteTable("customer_payment_methods", {
+export const customerPaymentMethods = pgTable("customer_payment_methods", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   stripeCustomerId: text("stripe_customer_id").notNull(),
@@ -253,51 +253,51 @@ export const customerPaymentMethods = sqliteTable("customer_payment_methods", {
   last4: text("last4").notNull(),
   expMonth: integer("exp_month"),
   expYear: integer("exp_year"),
-  isDefault: integer("is_default", { mode: "boolean" }).default(false),
+  isDefault: boolean("is_default").default(false),
   status: text("status", { enum: ["active", "expired", "failed"] }).notNull().default("active"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Transaction Fees - track Roony's fees per transaction
-export const transactionFees = sqliteTable("transaction_fees", {
+export const transactionFees = pgTable("transaction_fees", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   purchaseIntentId: text("purchase_intent_id").notNull().references(() => purchaseIntents.id),
   protocol: text("protocol").notNull(), // 'stripe_card', 'acp', 'ap2', 'x402', 'l402'
-  transactionAmount: real("transaction_amount").notNull(),
+  transactionAmount: doublePrecision("transaction_amount").notNull(),
   volumeTier: text("volume_tier").notNull(), // 'starter', 'growth', 'business', 'enterprise'
-  baseRate: real("base_rate").notNull(), // e.g., 0.03 for 3%
-  railMultiplier: real("rail_multiplier").notNull().default(1.0),
-  effectiveRate: real("effective_rate").notNull(),
-  feeAmount: real("fee_amount").notNull(),
-  totalCharged: real("total_charged").notNull(), // transaction_amount + fee_amount
+  baseRate: doublePrecision("base_rate").notNull(), // e.g., 0.03 for 3%
+  railMultiplier: doublePrecision("rail_multiplier").notNull().default(1.0),
+  effectiveRate: doublePrecision("effective_rate").notNull(),
+  feeAmount: doublePrecision("fee_amount").notNull(),
+  totalCharged: doublePrecision("total_charged").notNull(), // transaction_amount + fee_amount
   stripeChargeId: text("stripe_charge_id"), // ID of the charge to customer's card
   status: text("status", { enum: ["pending", "charged", "failed", "refunded"] }).notNull().default("pending"),
-  chargedAt: integer("charged_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  chargedAt: timestamp("charged_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Monthly Volumes - track org volume for tier calculation
-export const monthlyVolumes = sqliteTable("monthly_volumes", {
+export const monthlyVolumes = pgTable("monthly_volumes", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text("organization_id").notNull().references(() => organizations.id),
   month: text("month").notNull(), // '2025-12'
-  totalVolume: real("total_volume").default(0),
+  totalVolume: doublePrecision("total_volume").default(0),
   transactionCount: integer("transaction_count").default(0),
-  feeRevenue: real("fee_revenue").default(0),
+  feeRevenue: doublePrecision("fee_revenue").default(0),
   volumeTier: text("volume_tier"), // Current tier based on volume
   byProtocol: text("by_protocol"), // JSON: {"stripe_card": 5000, "x402": 2000}
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Treasury Balances - for crypto rails (Phase 3)
-export const treasuryBalances = sqliteTable("treasury_balances", {
+export const treasuryBalances = pgTable("treasury_balances", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   rail: text("rail").notNull().unique(), // 'stripe_issuing', 'usdc_base', 'lightning'
-  balance: real("balance").notNull().default(0),
-  lastRebalanceAt: integer("last_rebalance_at", { mode: "timestamp" }),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  balance: doublePrecision("balance").notNull().default(0),
+  lastRebalanceAt: timestamp("last_rebalance_at"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // ============================================

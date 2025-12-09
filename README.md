@@ -20,9 +20,17 @@ This is an early alpha. Card details are stored and returned to agents when appr
 git clone https://github.com/dylanwilson21/roony-governance.git
 cd roony-governance
 npm install
-npm run db:push
+
+# Create .env.local with your Supabase connection string
+# DATABASE_URL=postgres://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
+# NEXTAUTH_SECRET=<generate with: openssl rand -base64 32>
+# NEXTAUTH_URL=http://localhost:3000
+
+npm run db:push  # Push schema to Supabase
 npm run dev
 ```
+
+**Need a database?** Create a free [Supabase](https://supabase.com) project and copy the connection string from Settings → Database.
 
 Open http://localhost:3000 and:
 
@@ -75,12 +83,17 @@ Restart Claude Desktop. Ask it to check your budget or buy something.
 
 ## Deploy
 
-Push to GitHub, connect to [Vercel](https://vercel.com), add environment variables:
+1. Create a [Supabase](https://supabase.com) project
+2. Push to GitHub, connect to [Vercel](https://vercel.com)
+3. Add environment variables in Vercel:
 
 ```
+DATABASE_URL=postgres://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
 NEXTAUTH_SECRET=<generate with: openssl rand -base64 32>
 NEXTAUTH_URL=https://your-app.vercel.app
 ```
+
+4. After deploy, run `npm run db:push` locally to push the schema to Supabase
 
 ## Feedback
 

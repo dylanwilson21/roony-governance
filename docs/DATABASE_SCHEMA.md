@@ -2,7 +2,7 @@
 
 ## Overview
 
-Roony uses SQLite for development (easily switchable to PostgreSQL for production) with Drizzle ORM for type-safe database access.
+Roony uses PostgreSQL (via Supabase) with Drizzle ORM for type-safe database access.
 
 ## Tables
 

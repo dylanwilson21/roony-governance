@@ -2,43 +2,64 @@
 
 ## Overview
 
-This guide covers deploying Roony to production environments.
+This guide covers deploying Roony to Vercel with Supabase.
 
 ## Prerequisites
 
 - Node.js 18+ installed
-- Database (PostgreSQL recommended for production)
-- Stripe account with Issuing enabled
-- Domain name and SSL certificate
+- Supabase account (free tier works)
+- Vercel account
+- (Optional) Stripe account for full payment features
+
+## Quick Deploy to Vercel
+
+### 1. Create Supabase Project
+
+1. Go to [supabase.com](https://supabase.com) and create a project
+2. Go to **Settings → Database** and copy the connection string (URI format)
+3. It looks like: `postgres://postgres:[YOUR-PASSWORD]@db.[PROJECT-ID].supabase.co:5432/postgres`
+
+### 2. Deploy to Vercel
+
+1. Push your code to GitHub
+2. Go to [vercel.com](https://vercel.com) and import your repository
+3. Add environment variables:
+   - `DATABASE_URL` = your Supabase connection string
+   - `NEXTAUTH_SECRET` = generate with `openssl rand -base64 32`
+   - `NEXTAUTH_URL` = your Vercel URL (e.g., `https://your-app.vercel.app`)
+4. Deploy!
+
+### 3. Push Database Schema
+
+After deployment, push the schema to Supabase:
+
+```bash
+# Install dependencies locally
+npm install
+
+# Push schema (uses DATABASE_URL from .env.local)
+npm run db:push
+```
+
+Or use Supabase's SQL editor to run the migration SQL from `drizzle/`.
 
 ## Environment Variables
 
-Create a `.env.production` file:
-
 ```env
-# Application
-NODE_ENV=production
-NEXT_PUBLIC_APP_URL=https://roony.com
-PORT=3000
+# Database (Supabase Postgres)
+DATABASE_URL=postgres://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
 
-# Database
-DATABASE_URL=postgresql://user:password@host:5432/roony
+# Authentication (required)
+NEXTAUTH_SECRET=your-secret-key-here
+NEXTAUTH_URL=https://your-app.vercel.app
 
-# Stripe
+# Stripe (optional for alpha - full features require this)
 STRIPE_PUBLISHABLE_KEY=pk_live_...
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_CONNECT_CLIENT_ID=ca_...
 
-# Authentication
-NEXTAUTH_URL=https://roony.com
-NEXTAUTH_SECRET=your-secret-key-here
-
-# Encryption (for storing Stripe tokens)
-ENCRYPTION_KEY=your-32-byte-encryption-key
-
-# API
-API_RATE_LIMIT=100
+# Application
+NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
 ```
 
 ## Build Process

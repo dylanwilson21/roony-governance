@@ -1,18 +1,16 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "./schema";
-import path from "path";
-import fs from "fs";
 
-// Get database path
-const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "./roony.db";
+// Get database URL from environment
+const connectionString = process.env.DATABASE_URL;
 
-// Ensure directory exists
-const dbDir = path.dirname(path.resolve(dbPath));
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+if (!connectionString) {
+  throw new Error("DATABASE_URL environment variable is not set");
 }
 
-// Create database connection
-const sqlite = new Database(dbPath);
-export const db = drizzle(sqlite, { schema });
+// Create postgres connection
+const client = postgres(connectionString, { prepare: false });
+
+// Create drizzle instance
+export const db = drizzle(client, { schema });

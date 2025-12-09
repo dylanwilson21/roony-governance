@@ -101,14 +101,19 @@ If you prefer to run Roony yourself:
 git clone https://github.com/YOUR_USERNAME/roony-governance
 cd roony-governance
 npm install
-npm run db:push
 
 # Create a .env.local file with:
+# DATABASE_URL=postgres://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
 # NEXTAUTH_SECRET=your-secret-here
 # NEXTAUTH_URL=http://localhost:3000
 
+# Push schema to Supabase
+npm run db:push
+
 npm run dev
 ```
+
+**Database**: You'll need a PostgreSQL database. We recommend [Supabase](https://supabase.com) (free tier available).
 
 Then access at `http://localhost:3000`.
 
