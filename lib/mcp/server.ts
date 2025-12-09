@@ -184,7 +184,7 @@ export class RoonyMCPServer {
   }
 }
 
-// Parse and validate incoming MCP request
+// Parse and validate incoming MCP request or notification
 export function parseMCPRequest(body: unknown): MCPRequest | null {
   if (!body || typeof body !== "object") return null;
   
@@ -192,13 +192,21 @@ export function parseMCPRequest(body: unknown): MCPRequest | null {
   
   if (req.jsonrpc !== "2.0") return null;
   if (typeof req.method !== "string") return null;
-  if (req.id === undefined) return null;
   
+  // Notifications don't have an id, requests do
+  // We'll use null for notification id to differentiate
   return {
     jsonrpc: "2.0",
-    id: req.id as string | number,
+    id: req.id as string | number ?? null as unknown as string,
     method: req.method,
     params: req.params as Record<string, unknown> | undefined,
   };
+}
+
+// Check if a request is a notification (no id)
+export function isNotification(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const req = body as Record<string, unknown>;
+  return req.jsonrpc === "2.0" && typeof req.method === "string" && req.id === undefined;
 }
 

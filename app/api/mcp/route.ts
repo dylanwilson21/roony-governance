@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { db } from "@/lib/database";
 import { agents } from "@/lib/database/schema";
 import { eq } from "drizzle-orm";
-import { RoonyMCPServer, parseMCPRequest } from "@/lib/mcp/server";
+import { RoonyMCPServer, parseMCPRequest, isNotification } from "@/lib/mcp/server";
 import { MCPRequest, MCPResponse } from "@/lib/mcp/types";
 
 // CORS headers for MCP clients
@@ -213,6 +213,16 @@ export async function POST(request: NextRequest) {
       }
       
       return NextResponse.json(responses, { headers: corsHeaders });
+    }
+
+    // Check if it's a notification (no id) - these don't need a response
+    if (isNotification(body)) {
+      // Handle notification silently - just acknowledge receipt
+      // Common notifications: notifications/initialized, notifications/cancelled
+      if (sseSession) {
+        return new NextResponse(null, { status: 202, headers: corsHeaders });
+      }
+      return new NextResponse(null, { status: 204, headers: corsHeaders });
     }
 
     // Handle single request
