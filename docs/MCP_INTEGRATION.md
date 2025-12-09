@@ -1,4 +1,6 @@
-# MCP Integration Guide
+# MCP Integration
+
+> **Last Updated**: December 9, 2025 Guide
 
 Roony supports the **Model Context Protocol (MCP)**, allowing AI agents to integrate with Roony using the standardized MCP protocol. This enables seamless integration with MCP-compatible platforms and AI systems.
 
