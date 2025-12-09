@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 import { db } from "@/lib/database";
 import { agents } from "@/lib/database/schema";
 import { eq } from "drizzle-orm";
@@ -35,11 +36,14 @@ export async function POST(request: NextRequest) {
 
     const apiKey = authHeader.slice(7);
     
-    // Look up agent by API key
+    // Hash the API key for comparison
+    const apiKeyHash = createHash("sha256").update(apiKey).digest("hex");
+    
+    // Look up agent by API key hash
     const agent = await db
       .select()
       .from(agents)
-      .where(eq(agents.apiKeyHash, apiKey))
+      .where(eq(agents.apiKeyHash, apiKeyHash))
       .limit(1);
 
     if (agent.length === 0) {
