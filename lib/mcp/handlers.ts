@@ -117,26 +117,6 @@ export async function executeRequestPurchase(
     });
   }
 
-  // Get organization's stored card details
-  const org = await db
-    .select()
-    .from(organizations)
-    .where(eq(organizations.id, organizationId))
-    .limit(1);
-
-  const alphaCardDetails = org[0]?.alphaCardDetails 
-    ? JSON.parse(org[0].alphaCardDetails) 
-    : null;
-
-  if (!alphaCardDetails) {
-    return jsonResult({
-      status: "rejected",
-      reason_code: "NO_CARD",
-      message: "No payment card configured. Please add a card in Settings → Alpha Card.",
-      suggestion: "Ask an administrator to configure a payment card in the Roony dashboard.",
-    });
-  }
-
   // Create purchase intent record
   const intent = await db.insert(purchaseIntents).values({
     organizationId,
@@ -150,37 +130,26 @@ export async function executeRequestPurchase(
     status: "approved",
   }).returning();
 
+  // In production, this would call Stripe Issuing to create a real card
+  // For now, return mock card details
+  const mockCard = {
+    card_id: `card_${crypto.randomUUID().slice(0, 8)}`,
+    number: "4242424242424242",
+    exp_month: 12,
+    exp_year: new Date().getFullYear() + 1,
+    cvc: String(Math.floor(Math.random() * 900) + 100),
+    billing_zip: "10001",
+  };
+
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-  // Parse and validate card expiration
-  const expMonth = parseInt(alphaCardDetails.exp_month, 10);
-  const expYear = parseInt(alphaCardDetails.exp_year, 10);
-  
-  if (isNaN(expMonth) || expMonth < 1 || expMonth > 12) {
-    return jsonResult({
-      status: "rejected",
-      reason_code: "INVALID_CARD",
-      message: "Invalid card expiration month. Must be 1-12.",
-      suggestion: "Update your card details in Settings → Alpha Card.",
-    });
-  }
-  
-  if (isNaN(expYear) || expYear < new Date().getFullYear()) {
-    return jsonResult({
-      status: "rejected",
-      reason_code: "INVALID_CARD",
-      message: "Invalid or expired card year.",
-      suggestion: "Update your card details in Settings → Alpha Card.",
-    });
-  }
-
-  // Record the virtual card (using stored card info)
+  // Record the virtual card
   await db.insert(virtualCards).values({
     purchaseIntentId: intent[0].id,
-    stripeCardId: `alpha_${intent[0].id.slice(0, 8)}`,
-    last4: alphaCardDetails.number?.slice(-4) || "****",
-    expMonth,
-    expYear,
+    stripeCardId: mockCard.card_id,
+    last4: "4242",
+    expMonth: mockCard.exp_month,
+    expYear: mockCard.exp_year,
     hardLimit: amount as number,
     currency: currency as string,
     status: "active",
@@ -192,13 +161,8 @@ export async function executeRequestPurchase(
 
   return jsonResult({
     status: "approved",
-    card: {
-      number: alphaCardDetails.number,
-      exp_month: alphaCardDetails.exp_month,
-      exp_year: alphaCardDetails.exp_year,
-      cvc: alphaCardDetails.cvc,
-    },
-    approved_amount: amount,
+    card: mockCard,
+    hard_limit_amount: amount,
     currency: currency,
     expires_at: expiresAt.toISOString(),
     purchase_intent_id: intent[0].id,

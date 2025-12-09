@@ -6,6 +6,20 @@ import { eq } from "drizzle-orm";
 import { RoonyMCPServer, parseMCPRequest } from "@/lib/mcp/server";
 import { MCPRequest, MCPResponse } from "@/lib/mcp/types";
 
+// CORS headers for MCP clients
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+/**
+ * Handle CORS preflight requests
+ */
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 200, headers: corsHeaders });
+}
+
 /**
  * MCP Server Endpoint
  * 
@@ -30,7 +44,7 @@ export async function POST(request: NextRequest) {
           id: null, 
           error: { code: -32000, message: "Missing or invalid Authorization header" } 
         },
-        { status: 401 }
+        { status: 401, headers: corsHeaders }
       );
     }
 
@@ -53,7 +67,7 @@ export async function POST(request: NextRequest) {
           id: null, 
           error: { code: -32000, message: "Invalid API key" } 
         },
-        { status: 401 }
+        { status: 401, headers: corsHeaders }
       );
     }
 
@@ -67,7 +81,7 @@ export async function POST(request: NextRequest) {
           id: null, 
           error: { code: -32000, message: "Agent is not active" } 
         },
-        { status: 403 }
+        { status: 403, headers: corsHeaders }
       );
     }
 
@@ -93,7 +107,7 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      return NextResponse.json(responses);
+      return NextResponse.json(responses, { headers: corsHeaders });
     }
 
     // Handle single request
@@ -105,14 +119,14 @@ export async function POST(request: NextRequest) {
           id: null, 
           error: { code: -32600, message: "Invalid Request" } 
         },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
     const server = new RoonyMCPServer(agentId, organizationId);
     const response = await server.handleRequest(mcpRequest);
 
-    return NextResponse.json(response);
+    return NextResponse.json(response, { headers: corsHeaders });
   } catch (error) {
     console.error("MCP endpoint error:", error);
     return NextResponse.json(
@@ -121,7 +135,7 @@ export async function POST(request: NextRequest) {
         id: null, 
         error: { code: -32603, message: "Internal server error" } 
       },
-      { status: 500 }
+      { status: 500, headers: corsHeaders }
     );
   }
 }
@@ -129,7 +143,7 @@ export async function POST(request: NextRequest) {
 /**
  * GET endpoint for server info and health check
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   return NextResponse.json({
     name: "roony",
     version: "1.0.0",
@@ -148,6 +162,5 @@ export async function GET(request: NextRequest) {
       "get_policy_info",
     ],
     documentation: "/docs/MCP_INTEGRATION.md",
-  });
+  }, { headers: corsHeaders });
 }
-
