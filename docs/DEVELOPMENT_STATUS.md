@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated**: December 9, 2025
+**Last Updated**: December 9, 2025 (MCP CORS fix, alpha card restored)
 
 ## Project Overview
 
